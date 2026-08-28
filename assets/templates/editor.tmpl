@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{.htmlLang}}">
+<html lang="{{.htmlLang}}" data-bs-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,14 +8,15 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:      #0d0d0d;
-  --bar:     #111111;
-  --border:  #222222;
-  --accent:  #a78bfa;
-  --muted:   #4a4a4a;
-  --muted-hi:#777;
-  --text:    #e2e2e2;
-  --danger:  #f87171;
+  --bg:      oklch(15% .012 286);
+  --bar:     oklch(18% .014 286);
+  --border:  oklch(31% .018 286);
+  --accent:  oklch(74% .13 303);
+  --muted:   oklch(42% .015 286);
+  --muted-hi:oklch(62% .018 286);
+  --text:    oklch(91% .015 286);
+  --danger:  oklch(71% .16 24);
+  --success: oklch(76% .13 151);
   --font: ui-monospace,'SFMono-Regular',Menlo,'Cascadia Code',Consolas,monospace;
 }
 
@@ -82,7 +83,7 @@ body { overflow: hidden; background: var(--bg); }
 
 #saveBtn {
   background: none;
-  border: 1px solid #333;
+  border: 1px solid var(--border);
   color: var(--muted-hi);
   font-family: var(--font);
   font-size: 11px;
@@ -95,11 +96,11 @@ body { overflow: hidden; background: var(--bg); }
 #saveBtn:hover {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(167,139,250,.1);
+  background: oklch(74% .13 303 / .1);
 }
 #saveBtn.saved {
-  border-color: #4ade80;
-  color: #4ade80;
+  border-color: var(--success);
+  color: var(--success);
 }
 
 /* ── Ace editor ── */
@@ -120,17 +121,15 @@ body { overflow: hidden; background: var(--bg); }
   <span id="dot"></span>
   <div class="bar-right">
     <span class="bar-hint" id="shortcutHint"></span>
-    <button id="saveBtn" onclick="save()">Save</button>
+    <button id="saveBtn" onclick="save()">{{t "save"}}</button>
   </div>
 </div>
 
-<pre id="editor">
-{{.data}}
-</pre>
+<pre id="editor">{{.data}}</pre>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.16.0/ace.min.js" charset="utf-8"></script>
-<script src="https://s3.pstatp.com/cdn/expire-1-M/jquery/3.2.1/jquery.min.js"></script>
 <script>
+    var csrf = {{js .csrf}};
     var editor = ace.edit("editor");
     editor.setTheme("ace/theme/tomorrow_night_bright");
     editor.setOptions({
@@ -141,7 +140,7 @@ body { overflow: hidden; background: var(--bg); }
         highlightActiveLine: true
     });
     var moData  = editor.getValue();
-    var curPath = "{{.path}}";
+    var curPath = {{js .path}};
     var dot     = document.getElementById("dot");
     var saveBtn = document.getElementById("saveBtn");
 
@@ -191,34 +190,24 @@ body { overflow: hidden; background: var(--bg); }
     });
 
     function save() {
-        if (confirm("确认保存吗？")) {
-            $.post("/do/save", {path: curPath, data: editor.getValue()}, function(data, status) {
-                if (status === "success") {
-                    if (data.stat) {
-                        moData = editor.getValue();
-                        dot.style.display = "none";
-                        saveBtn.classList.add("saved");
-                        saveBtn.textContent = "Saved";
-                        setTimeout(function() {
-                            saveBtn.classList.remove("saved");
-                            saveBtn.textContent = "Save";
-                        }, 2000);
-                        if (confirm("保存成功，点击确认刷新")) {
-                            var f = document.createElement("form");
-                            f.action = "/edite"; f.method = "post";
-                            f.style.display = "none";
-                            var i = document.createElement("input");
-                            i.type = "text"; i.name = "path"; i.value = "{{.path}}";
-                            f.appendChild(i); document.body.appendChild(f); f.submit();
-                        }
-                    } else {
-                        alert("保存失败");
-                    }
-                } else {
-                    alert("请求失败");
-                }
-            });
-        }
+        if (!confirm({{js (t "save")}} + "?")) return;
+        fetch("/do/save", {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf},
+            body: "path=" + encodeURIComponent(curPath) + "&data=" + encodeURIComponent(editor.getValue())
+        }).then(function(response) { return response.json(); }).then(function(data) {
+            if (!data.ok) throw new Error(data.code || "io_error");
+            moData = editor.getValue();
+            dot.style.display = "none";
+            saveBtn.classList.add("saved");
+            saveBtn.textContent = {{js (t "saved")}};
+            setTimeout(function() {
+                saveBtn.classList.remove("saved");
+                saveBtn.textContent = {{js (t "save")}};
+            }, 2000);
+        }).catch(function() {
+            alert({{js (t "operationFailed")}});
+        });
     }
 </script>
 

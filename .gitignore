@@ -2,3 +2,6 @@ test.go
 test.jpg
 main
 CLAUDE.md
+.env
+.env.*
+!.env.example

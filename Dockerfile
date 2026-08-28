@@ -20,7 +20,8 @@ WORKDIR /app
 
 # 复制构建好的可执行文件到容器中
 COPY --from=builder /gofile/goFile /app/
-COPY --from=builder /gofile/templates /app/templates
+# The templates are embedded in the binary via assets/templates, so no runtime
+# template directory is needed.
 
 # 暴露容器的 8089 端口
 EXPOSE 8089

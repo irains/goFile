@@ -1,8 +1,26 @@
 package conf
 
+import "time"
+
+// Info is the safe, direct-child view of a directory.
 type Info struct {
-	Files []File
-	Dirs  []Dir
+	Entries []Entry
+	Files   []File // Kept for compatibility with external template customizations.
+	Dirs    []Dir  // Kept for compatibility with external template customizations.
+}
+
+// Entry is an item rendered in the file workspace. Version is an optimistic
+// concurrency marker that must be revalidated by state-changing operations.
+type Entry struct {
+	Name      string
+	Path      string
+	Kind      string
+	Size      int64
+	Modified  time.Time
+	Mode      string
+	Extension string
+	IsArchive bool
+	Version   string
 }
 
 type File struct {
@@ -19,4 +37,5 @@ type Dir struct {
 var (
 	GoFilePort string
 	GoFile     string
+	Host       string
 )

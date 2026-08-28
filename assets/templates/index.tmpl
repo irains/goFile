@@ -1,314 +1,226 @@
 <!DOCTYPE html>
-<html lang="{{.htmlLang}}">
+<html lang="{{.htmlLang}}" data-bs-theme="dark">
 {{template "public/header" .}}
 <body>
-<div class="wrap">
+<a class="skip-link" href="#workspace">{{t "dls"}}</a>
+<div class="app-shell">
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="goFile {{t "dls"}}">
+      <span class="brand-mark">› goFile</span>
+      <span class="brand-subtitle">{{t "appSubtitle"}}</span>
+    </a>
+    <div class="user-menu">
+      <span class="user-avatar" aria-hidden="true">A</span>
+      <span class="user-name">{{.username}}</span>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="logoutButton">{{t "logout"}}</button>
+    </div>
+  </header>
 
-  <!-- header -->
-  <div class="hd">
-    <a class="logo" href="/">goFile</a>
-  </div>
+  <nav aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">~</a></li>
+      {{if .rawPath}}<li class="breadcrumb-item active" aria-current="page">{{.rawPath}}</li>{{end}}
+    </ol>
+  </nav>
+
   {{if .diskTotal}}
-  <div class="disk">
-    <div class="disk-bar"><div class="disk-fill{{if gt .diskPct 85}} warn{{end}}" style="width:{{.diskPct}}%"></div></div>
-    <span class="disk-text">{{.diskFree}} free · {{.diskTotal}}</span>
+  <div class="mb-4" aria-label="Disk usage">
+    <div class="d-flex justify-content-between small text-secondary mb-2"><span>{{.diskFree}} free</span><span>{{.diskTotal}}</span></div>
+    <div class="disk-meter"><span style="width:{{.diskPct}}%"></span></div>
   </div>
-  {{else}}
-  <div class="hd-line"></div>
   {{end}}
 
-  <!-- breadcrumb + back -->
-  <div class="nav-row">
-    <nav class="bc" id="bc"></nav>
-    {{if .prev}}<a class="back" href="{{.prev}}">{{t "rl"}}</a>{{end}}
-  </div>
-  <script>
-  (function(){
-    var path = '{{.path}}';
-    var bc = document.getElementById('bc');
-    var html = '<a href="/">~</a>';
-    if (path) {
-      var parts = path.replace(/\/$/, '').split('/').filter(Boolean);
-      var acc = '';
-      for (var i = 0; i < parts.length; i++) {
-        acc += encodeURIComponent(parts[i]) + '/';
-        var isCur = i === parts.length - 1;
-        var label = parts[i].replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        html += '<span class="bc-sep">/</span>';
-        html += '<a' + (isCur ? ' class="bc-cur"' : '') + ' href="/d/' + acc + '">' + label + '</a>';
-      }
-    }
-    bc.innerHTML = html;
-  })();
-  </script>
-
-  {{$r := .reader}}
-
-  <!-- directories -->
-  {{if .info.Dirs}}
-  <div class="label">{{t "dls"}}</div>
-  <ul class="rows">
-    {{$path := .path}}
-    {{range .info.Dirs}}
-    <li class="row">
-      <span class="row-ico d">▸</span>
-      <div class="row-name">
-        <a href="/d/{{$path}}{{.DirName}}">{{.DirName}}</a>
+  <main id="workspace" aria-busy="false">
+    <div class="workspace-toolbar">
+      <div>
+        <h1 class="workspace-title">{{t "dls"}}</h1>
+        <p class="workspace-meta">{{.rawPath}}{{if not .rawPath}}/{{end}} · {{len .info.Entries}} {{t "selected"}}</p>
       </div>
-      {{if not $r}}
-      <div class="row-acts">
-        <a class="btn del" onclick="rm({{.DirPath}})">{{t "del"}}</a>
-      </div>
-      {{end}}
-    </li>
-    {{end}}
-  </ul>
-  {{end}}
-
-  <!-- files -->
-  {{if .info.Files}}
-  <div class="label">{{t "fls"}}</div>
-  <ul class="rows">
-    {{range .info.Files}}
-    <li class="row">
-      <span class="row-ico">—</span>
-      <div class="row-name">
-        <a target="_blank" href="/download/{{.FilePath}}">{{.FileName}}</a>
-        {{if .IsZip}}<span class="tag">zip</span>{{end}}
-      </div>
-      <div class="row-acts">
-        <a class="btn" target="_blank" href="/view/{{.FilePath}}">{{t "view"}}</a>
-        {{if not $r}}
-        <a class="btn" onclick="edite({{.FilePath}})">{{t "edit"}}</a>
-        {{if .IsZip}}
-        <a class="btn" onclick="unzip({{.FilePath}})">{{t "unzip"}}</a>
-        {{end}}
-        {{if not (hasSuffix .FileName ".md5")}}<a class="btn" onclick="md5file({{.FilePath}})">MD5</a>{{end}}
-        <a class="btn del" onclick="rm({{.FilePath}})">{{t "del"}}</a>
+      <div class="d-flex flex-wrap gap-2">
+        {{if .prev}}<a class="btn btn-outline-secondary" href="{{.prev}}">← {{t "back"}}</a>{{end}}
+        {{if not .reader}}
+        <button class="btn btn-outline-secondary" type="button" data-action="new-file">+ {{t "nFile"}}</button>
+        <button class="btn btn-primary" type="button" data-action="new-folder">+ {{t "nDir"}}</button>
         {{end}}
       </div>
-    </li>
-    {{end}}
-  </ul>
-  {{end}}
-
-  {{if and (not .info.Dirs) (not .info.Files)}}
-  <div class="empty">empty</div>
-  {{end}}
-
-  <!-- toolbar -->
-  {{if not $r}}
-  <div class="toolbar">
-    <button class="tbtn" onclick="createNewFile()"><span class="pfx">+</span>{{t "nFile"}}</button>
-    <button class="tbtn" onclick="createNewDir()"><span class="pfx">+</span>{{t "nDir"}}</button>
-  </div>
-  {{end}}
-
-  <!-- upload -->
-  {{if .allowUpload}}
-  <div class="label up-section">{{t "cUpFile"}}</div>
-  <div class="drop" id="dropZone">
-    <p class="drop-hint">drop here · or <em>browse</em></p>
-    <input type="file" id="fileInput">
-  </div>
-  <div class="prog" id="prog">
-    <div class="prog-meta">
-      <span id="prog-name"></span>
-      <span id="prog-pct">0%</span>
     </div>
-    <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
-  </div>
 
-  <div class="label">{{t "api"}}</div>
-  <div class="api-box">
-    <div class="api-meta">
-      <span class="api-method">POST</span>
-      <span class="api-endpoint" id="api-endpoint"></span>
-      <button class="api-copy" id="api-copy-btn" onclick="copyApi()">{{t "copy"}}</button>
+    {{if .info.Entries}}
+    <div class="table-wrap">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle" id="fileTable">
+          <thead>
+            <tr>
+              <th scope="col" style="width:3rem"><input class="form-check-input" type="checkbox" id="selectAll" aria-label="{{t "selectAll"}}"></th>
+              <th scope="col">{{t "name"}}</th>
+              <th scope="col" class="col-type">{{t "kind"}}</th>
+              <th scope="col" class="col-size">{{t "size"}}</th>
+              <th scope="col" class="col-modified">{{t "modified"}}</th>
+              <th scope="col" class="text-end" style="width:3.5rem"><span class="visually-hidden">{{t "actions"}}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .info.Entries}}
+            <tr data-name="{{.Name}}" data-path="{{.Path}}" data-version="{{.Version}}" data-kind="{{.Kind}}">
+              <td><input class="form-check-input entry-check" type="checkbox" aria-label="{{t "selectItem"}} {{.Name}}"></td>
+              <td>
+                <div class="d-flex align-items-center gap-2 min-w-0">
+                  <span class="item-icon {{if eq .Kind "directory"}}folder{{end}}" aria-hidden="true">{{if eq .Kind "directory"}}▸{{else}}·{{end}}</span>
+                  {{if eq .Kind "directory"}}<a class="item-name" href="/d/{{.Path}}">{{.Name}}</a>{{else}}<a class="item-name" href="/download/{{.Path}}">{{.Name}}</a>{{end}}
+                </div>
+                <div class="item-meta-mobile">{{if eq .Kind "directory"}}{{t "folder"}}{{else}}{{if .Extension}}{{.Extension}}{{else}}{{t "file"}}{{end}}{{end}} · <span data-size="{{.Size}}"></span> · <time datetime="{{.Modified.Format "2006-01-02T15:04:05Z07:00"}}" data-time="{{.Modified.Unix}}"></time></div>
+              </td>
+              <td class="col-type"><span class="kind-badge">{{if eq .Kind "directory"}}{{t "folder"}}{{else}}{{if .Extension}}{{.Extension}}{{else}}{{t "file"}}{{end}}{{end}}</span></td>
+              <td class="col-size text-secondary"><span data-size="{{.Size}}">{{.Size}}</span></td>
+              <td class="col-modified text-secondary"><time datetime="{{.Modified.Format "2006-01-02T15:04:05Z07:00"}}" data-time="{{.Modified.Unix}}">{{.Modified.Format "2006-01-02 15:04"}}</time></td>
+              <td class="text-end">
+                <div class="dropdown">
+                  <button class="btn btn-sm btn-icon btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="{{t "more"}} {{.Name}}">⋯</button>
+                  <ul class="dropdown-menu dropdown-menu-end">
+                    {{if eq .Kind "directory"}}<li><a class="dropdown-item" href="/d/{{.Path}}">↗ {{t "folder"}}</a></li>{{else}}<li><a class="dropdown-item" href="/download/{{.Path}}">↓ {{t "download"}}</a></li>{{if previewable .Path}}<li><a class="dropdown-item" target="_blank" href="/view/{{.Path}}">◌ {{t "view"}}</a></li>{{end}}{{if not $.reader}}<li><a class="dropdown-item" target="_blank" href="/edit/{{.Path}}">⌘ {{t "edit"}}</a></li>{{end}}{{end}}
+                    <li><button class="dropdown-item" type="button" data-action="properties">ⓘ {{t "properties"}}</button></li>
+                    {{if not $.reader}}
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button class="dropdown-item" type="button" data-action="rename">↻ {{t "rename"}}</button></li>
+                    <li><button class="dropdown-item" type="button" data-action="move">→ {{t "move"}}</button></li>
+                    <li><button class="dropdown-item" type="button" data-action="copy">⧉ {{t "copy"}}</button></li>
+                    {{if eq .Kind "directory"}}<li><button class="dropdown-item" type="button" data-action="zip">⌑ {{t "zip"}}</button></li>{{else}}{{if .IsArchive}}<li><button class="dropdown-item" type="button" data-action="unzip">⌑ {{t "unzip"}}</button></li>{{end}}<li><button class="dropdown-item" type="button" data-action="md5"># {{t "md5"}}</button></li>{{end}}
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button class="dropdown-item danger" type="button" data-action="delete">× {{t "del"}}</button></li>
+                    {{end}}
+                  </ul>
+                </div>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
     </div>
-    <div class="api-code-wrap">
-      <code class="api-code" id="api-code"></code>
-    </div>
-  </div>
-
-  <script src="https://s3.pstatp.com/cdn/expire-1-M/jquery/3.2.1/jquery.min.js"></script>
-  <script>
-    var CHUNK_SIZE = 2 * 1024 * 1024;
-
-    function getFileId(f) { return f.name + '_' + f.size + '_' + f.lastModified; }
-
-    function showProgress(name) {
-      document.getElementById('prog').style.display = 'block';
-      document.getElementById('prog-name').textContent = name;
-      updateProgress(0);
-    }
-    function updateProgress(pct) {
-      var p = Math.min(100, Math.round(pct));
-      document.getElementById('prog-fill').style.width = p + '%';
-      document.getElementById('prog-pct').textContent = p + '%';
-    }
-    function hideProgress() { document.getElementById('prog').style.display = 'none'; }
-
-    function checkChunks(fileId, total) {
-      return fetch('/do/chunk/check', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'fileId=' + encodeURIComponent(fileId) + '&totalChunks=' + total
-      }).then(function(r){return r.json();}).then(function(d){return d.uploaded||[];}).catch(function(){return[];});
-    }
-    function uploadChunk(fileId, idx, total, chunk, onProg) {
-      return new Promise(function(resolve, reject) {
-        var fd = new FormData();
-        fd.append('fileId', fileId); fd.append('chunkIndex', idx);
-        fd.append('totalChunks', total); fd.append('file', chunk);
-        var xhr = new XMLHttpRequest();
-        xhr.upload.addEventListener('progress', function(e) { if (e.lengthComputable) onProg(e.loaded/e.total); });
-        xhr.onload = function() {
-          try { var d = JSON.parse(xhr.responseText); d.stat ? resolve() : reject(new Error('chunk failed')); }
-          catch(e) { reject(e); }
-        };
-        xhr.onerror = function() { reject(new Error('network error')); };
-        xhr.open('POST', '/do/chunk/upload');
-        xhr.send(fd);
-      });
-    }
-    function showToast(msg, warn) {
-      var t = document.createElement('div');
-      t.className = 'toast' + (warn ? ' warn' : '');
-      t.textContent = msg;
-      document.body.appendChild(t);
-      setTimeout(function() { t.remove(); }, 2400);
-    }
-
-    function mergeChunks(fileId, total, name, path, size) {
-      return fetch('/do/chunk/merge', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'fileId=' + encodeURIComponent(fileId) + '&totalChunks=' + total +
-              '&fileName=' + encodeURIComponent(name) + '&path=' + encodeURIComponent(path) +
-              '&fileSize=' + size
-      }).then(function(r){return r.json();});
-    }
-
-    async function uploadFile(file, uploadPath) {
-      var fileId = getFileId(file);
-      var total  = Math.ceil(file.size / CHUNK_SIZE) || 1;
-      showProgress(file.name);
-      var done = await checkChunks(fileId, total);
-      var doneSet = new Set(done);
-      var completed = done.length;
-      for (var i = 0; i < total; i++) {
-        if (doneSet.has(i)) { updateProgress(completed / total * 100); continue; }
-        var chunk = file.slice(i * CHUNK_SIZE, Math.min((i+1) * CHUNK_SIZE, file.size));
-        var ci = i;
-        try {
-          await uploadChunk(fileId, ci, total, chunk, function(p) {
-            updateProgress((completed + p) / total * 100);
-          });
-          completed++;
-          updateProgress(completed / total * 100);
-        } catch(e) { hideProgress(); showToast('{{t "upFile"}} {{t "fl"}}：' + e.message, true); return; }
-      }
-      updateProgress(100);
-      try {
-        var d = await mergeChunks(fileId, total, file.name, uploadPath, file.size);
-        hideProgress();
-        if (d.stat) {
-          showToast(d.skipped ? '{{t "upFile"}} {{t "skip"}}' : '{{t "upFile"}} {{t "sc"}}', d.skipped);
-          if (!d.skipped) setTimeout(function(){ location.reload(); }, 800);
-          else setTimeout(function(){ location.reload(); }, 1800);
-        } else { showToast('{{t "upFile"}} {{t "fl"}}', true); }
-      } catch(e) { hideProgress(); showToast('{{t "reqFail"}}', true); }
-    }
-
-    var dz = document.getElementById('dropZone');
-    document.body.addEventListener('dragover',  function(e) { e.preventDefault(); e.stopPropagation(); dz.classList.add('over'); });
-    document.body.addEventListener('dragleave', function(e) { if (!dz.contains(e.relatedTarget)) dz.classList.remove('over'); });
-    document.body.addEventListener('drop', function(e) {
-      e.preventDefault(); e.stopPropagation(); dz.classList.remove('over');
-      var f = e.dataTransfer.files[0];
-      if (f) uploadFile(f, '{{.path}}');
-    });
-    document.getElementById('fileInput').addEventListener('change', function() {
-      if (this.files.length > 0) uploadFile(this.files[0], '{{.path}}');
-    });
-
-    {{if not $r}}
-    function createNewDir() {
-      var n = window.prompt("{{t "nDir"}}:");
-      if (n !== null) $.post("/do/newdir", {path:{{.path}}, dirname:n}, function(d,s) {
-        if (s=="success") { if(d.stat) { if(confirm("OK")) location.reload(); } else alert("fail"); }
-        else alert('{{t "reqFail"}}');
-      });
-    }
-    function createNewFile() {
-      var n = window.prompt("{{t "nFile"}}:");
-      if (n !== null) $.post("/do/newfile", {path:{{.path}}, filename:n}, function(d,s) {
-        if (s=="success") { if(d.stat) { if(confirm("OK")) location.reload(); } else alert("fail"); }
-        else alert('{{t "reqFail"}}');
-      });
-    }
-    function unzip(p) {
-      if (confirm("unzip " + p + "?")) $.post("/do/unzip", {path:p}, function(d,s) {
-        if (s=="success") { if(d.stat) { if(confirm("OK")) location.reload(); } else alert("fail"); }
-        else alert('{{t "reqFail"}}');
-      });
-    }
-    function rm(p) {
-      if (confirm("delete " + p + "?")) $.post("/do/rm", {path:p}, function(d,s) {
-        if (s=="success") { if(d.stat) { if(confirm("OK")) location.reload(); } else alert("fail"); }
-        else alert('{{t "reqFail"}}');
-      });
-    }
-    function edite(path) {
-      var f = document.createElement("form");
-      f.action="/edite"; f.method="post"; f.target="_blank"; f.style.display="none";
-      var i = document.createElement("input"); i.type="text"; i.name="path"; i.value=path;
-      f.appendChild(i); document.body.appendChild(f); f.submit();
-    }
-    function md5file(p) {
-      $.post("/do/md5", {path: p}, function(d, s) {
-        if (s === "success") {
-          if (d.stat) { alert("MD5: " + d.hash); location.reload(); }
-          else alert("fail");
-        } else alert('{{t "reqFail"}}');
-      });
-    }
+    {{else}}
+    <section class="empty-state" aria-label="{{t "empty"}}"><p class="mb-0">{{t "empty"}}</p></section>
     {{end}}
 
-    (function() {
-      var origin = window.location.origin;
-      var uploadPath = '{{.path}}';
-      document.getElementById('api-endpoint').textContent = '/api/upload';
-      document.getElementById('api-code').textContent =
-        'curl -X POST ' + origin + '/api/upload \\\n' +
-        '  -F "path=' + uploadPath + '" \\\n' +
-        '  -F "file=@/path/to/file"';
-    })();
-    function copyApi() {
-      var text = document.getElementById('api-code').textContent;
-      var btn = document.getElementById('api-copy-btn');
-      function done() {
-        btn.textContent = '{{t "copied"}}'; btn.classList.add('ok');
-        setTimeout(function() { btn.textContent = '{{t "copy"}}'; btn.classList.remove('ok'); }, 2000);
-      }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done).catch(function() {
-          var ta = document.createElement('textarea'); ta.value = text;
-          ta.style.position = 'fixed'; ta.style.opacity = '0';
-          document.body.appendChild(ta); ta.select(); document.execCommand('copy');
-          document.body.removeChild(ta); done();
-        });
-      } else {
-        var ta = document.createElement('textarea'); ta.value = text;
-        ta.style.position = 'fixed'; ta.style.opacity = '0';
-        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
-        document.body.removeChild(ta); done();
-      }
-    }
-  </script>
-  {{end}}
+    <section id="bulkBar" class="bulk-bar" aria-label="{{t "actions"}}">
+      <span class="bulk-count" id="bulkCount">0 {{t "selected"}}</span>
+      {{if not .reader}}<button class="btn btn-sm btn-outline-secondary" type="button" data-batch-action="move">→ {{t "batchMove"}}</button><button class="btn btn-sm btn-outline-secondary" type="button" data-batch-action="copy">⧉ {{t "batchCopy"}}</button>{{end}}
+      <button class="btn btn-sm btn-outline-secondary" type="button" data-batch-action="download">↓ {{t "downloadZip"}}</button>
+      <span class="bulk-spacer"></span>
+      {{if not .reader}}<button class="btn btn-sm btn-outline-danger" type="button" data-batch-action="delete">× {{t "batchDelete"}}</button>{{end}}
+      <button class="btn btn-sm btn-outline-secondary" type="button" id="clearSelection">{{t "clear"}}</button>
+    </section>
 
+    {{if .allowUpload}}
+    <section class="upload-panel" aria-labelledby="uploadHeading">
+      <h2 class="h6 mb-3" id="uploadHeading">{{t "upload"}}</h2>
+      <div class="drop-zone" id="dropZone"><span>{{t "uploadHint"}}</span><input type="file" id="fileInput" aria-label="{{t "upload"}}"></div>
+      <div class="progress mt-3 d-none" id="uploadProgress" role="progressbar" aria-label="{{t "uploading"}}"><div class="progress-bar" id="uploadProgressBar" style="width:0%"></div></div>
+      <div class="mt-4 small text-secondary">
+        <div class="fw-semibold text-body mb-2">{{t "api"}}</div>
+        <div class="d-flex gap-2 align-items-start"><code class="flex-grow-1 text-break" id="apiCommand"></code><button class="btn btn-sm btn-outline-secondary" type="button" id="copyApi">{{t "copyCommand"}}</button></div>
+      </div>
+    </section>
+    {{end}}
+  </main>
 </div>
+
+<div class="offcanvas offcanvas-end" tabindex="-1" id="actionPanel" aria-labelledby="actionPanelTitle">
+  <div class="offcanvas-header"><h2 class="offcanvas-title h5" id="actionPanelTitle"></h2><button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="{{t "cancel"}}"></button></div>
+  <div class="offcanvas-body">
+    <p class="text-secondary" id="actionPanelSummary"></p>
+    <div class="mb-3 d-none" id="nameFieldWrap"><label class="form-label" for="actionName">{{t "newName"}}</label><input class="form-control" id="actionName" autocomplete="off"></div>
+    <div class="mb-3 d-none" id="destinationFieldWrap"><label class="form-label" for="actionDestination">{{t "destination"}}</label><input class="form-control" id="actionDestination" placeholder="logs/archive" autocomplete="off"><div class="form-text text-secondary">{{t "keepName"}}</div></div>
+    <div id="propertiesContent" class="small"></div>
+    <div class="d-flex justify-content-end gap-2 mt-4" id="actionPanelButtons"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="offcanvas">{{t "cancel"}}</button><button type="button" class="btn btn-primary" id="actionSubmit">{{t "confirm"}}</button></div>
+  </div>
+</div>
+
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="deleteModalTitle">{{t "deleteTitle"}}</h2><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="{{t "cancel"}}"></button></div><div class="modal-body"><p id="deleteSummary"></p><p class="text-danger mb-0">{{t "deleteHint"}}</p></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">{{t "cancel"}}</button><button type="button" class="btn btn-danger" id="confirmDelete">{{t "deleteItems"}}</button></div></div></div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3"><div id="noticeToast" class="toast" role="status" aria-live="polite"><div class="d-flex"><div class="toast-body" id="noticeText"></div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="{{t "cancel"}}"></button></div></div></div>
+<div class="status-live" id="liveStatus" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+<script>
+(function () {
+  const labels = {{js (t "operationFailed")}};
+  const strings = {
+    selected: {{js (t "selected")}}, working: {{js (t "working")}}, properties: {{js (t "properties")}},
+    rename: {{js (t "rename")}}, move: {{js (t "move")}}, copy: {{js (t "copy")}},
+    newFile: {{js (t "nFile")}}, newFolder: {{js (t "nDir")}}, zip: {{js (t "zip")}}, unzip: {{js (t "unzip")}}, md5: {{js (t "md5")}},
+    propertiesLoading: {{js (t "propertiesLoading")}}, operationFailed: labels,
+    deleteTitle: {{js (t "deleteTitle")}}, deleteItems: {{js (t "deleteItems")}}, incomplete: {{js (t "incomplete")}},
+    invalid_path: {{js (t "invalid_path")}}, invalid_name: {{js (t "invalid_name")}}, not_found: {{js (t "not_found")}}, destination_exists: {{js (t "destination_exists")}}, source_changed: {{js (t "source_changed")}}, self_descendant: {{js (t "self_descendant")}}, cross_device_move: {{js (t "cross_device_move")}}, batch_limit_exceeded: {{js (t "batch_limit_exceeded")}}, archive_limit_exceeded: {{js (t "archive_limit_exceeded")}}, root_operation_forbidden: {{js (t "root_operation_forbidden")}}, io_error: {{js (t "io_error")}}, execution_partial: {{js (t "execution_partial")}}, delete_partial: {{js (t "delete_partial")}}
+  };
+  const rawPath = {{js .rawPath}};
+  const listingToken = {{js .listingToken}};
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  const selected = new Set();
+  const table = document.getElementById('fileTable');
+  const selectAll = document.getElementById('selectAll');
+  const bulkBar = document.getElementById('bulkBar');
+  const bulkCount = document.getElementById('bulkCount');
+  const main = document.getElementById('workspace');
+  const live = document.getElementById('liveStatus');
+  const toast = document.getElementById('noticeToast');
+  const toastText = document.getElementById('noticeText');
+  const toastInstance = new bootstrap.Toast(toast, {delay: 3600});
+  const panelEl = document.getElementById('actionPanel');
+  const panel = new bootstrap.Offcanvas(panelEl);
+  const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+  let actionContext = null;
+  let deleteContext = null;
+
+  function showNotice(text, error) { toastText.textContent = text; toast.classList.toggle('border-danger', !!error); toastInstance.show(); live.textContent = text; }
+  function formatBytes(value) { const number = Number(value || 0); if (number < 1024) return number + ' B'; const units = ['KB','MB','GB','TB']; let amount = number / 1024, index = 0; while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++; } return amount.toFixed(amount >= 10 ? 0 : 1) + ' ' + units[index]; }
+  function formatTime(value) { return new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeStyle:'short'}).format(new Date(Number(value) * 1000)); }
+  document.querySelectorAll('[data-size]').forEach(el => el.textContent = formatBytes(el.dataset.size));
+  document.querySelectorAll('time[data-time]').forEach(el => el.textContent = formatTime(el.dataset.time));
+
+  function setBusy(value) { main.setAttribute('aria-busy', value ? 'true' : 'false'); document.querySelectorAll('button, input').forEach(el => { if (el.closest('#logoutButton') || el.dataset.bsDismiss) return; el.disabled = value; }); }
+  function selectedRows() { return Array.from(table ? table.querySelectorAll('tbody tr') : []).filter(row => selected.has(row.dataset.name)); }
+  function updateSelection() { const rows = selectedRows(); const checks = table ? Array.from(table.querySelectorAll('.entry-check')) : []; checks.forEach(check => { check.checked = selected.has(check.closest('tr').dataset.name); }); if (selectAll) { selectAll.checked = checks.length > 0 && rows.length === checks.length; selectAll.indeterminate = rows.length > 0 && rows.length < checks.length; } if (bulkBar) bulkBar.classList.toggle('visible', rows.length > 0); if (bulkCount) bulkCount.textContent = rows.length + ' ' + strings.selected; }
+  function clearSelection() { selected.clear(); updateSelection(); }
+  if (table) table.addEventListener('change', event => { if (!event.target.classList.contains('entry-check')) return; const name = event.target.closest('tr').dataset.name; event.target.checked ? selected.add(name) : selected.delete(name); updateSelection(); });
+  if (selectAll) selectAll.addEventListener('change', () => { table.querySelectorAll('tbody tr').forEach(row => selectAll.checked ? selected.add(row.dataset.name) : selected.delete(row.dataset.name)); updateSelection(); });
+  document.getElementById('clearSelection')?.addEventListener('click', clearSelection);
+
+  async function request(path, data, method = 'POST') { const options = {method, headers: {'X-CSRF-Token': csrf}}; if (data !== undefined) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(data); } const response = await fetch(path, options); let body = {}; try { body = await response.json(); } catch (_) {} if (!response.ok || !body.ok) { throw new Error(body.code || 'operationFailed'); } return body; }
+  function formRequest(path, values) { const body = new URLSearchParams(values); return fetch(path, {method:'POST', headers:{'X-CSRF-Token': csrf, 'Content-Type':'application/x-www-form-urlencoded'}, body}).then(async response => { const data = await response.json().catch(() => ({})); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); return data; }); }
+  function errorText(error) { return strings[error.message] || strings.operationFailed; }
+  function entryFor(row) { return {name: row.dataset.name, path: row.dataset.path, version: row.dataset.version, kind: row.dataset.kind}; }
+  function currentEntries() { return selectedRows().map(entryFor); }
+
+  function openPanel(type, row, batch) {
+    actionContext = {type, row, batch};
+    const nameWrap = document.getElementById('nameFieldWrap'); const destinationWrap = document.getElementById('destinationFieldWrap'); const content = document.getElementById('propertiesContent'); const buttons = document.getElementById('actionPanelButtons');
+    content.replaceChildren(); nameWrap.classList.add('d-none'); destinationWrap.classList.add('d-none'); buttons.classList.remove('d-none');
+    const entries = batch ? currentEntries() : (row ? [entryFor(row)] : []);
+    document.getElementById('actionPanelSummary').textContent = batch ? entries.slice(0, 3).map(item => item.name).join(', ') + (entries.length > 3 ? ' +' + (entries.length - 3) : '') : (row ? row.dataset.name : '');
+    const titleMap = {rename: strings.rename, move: strings.move, copy: strings.copy, properties: strings.properties, 'new-file': strings.newFile, 'new-folder': strings.newFolder};
+    document.getElementById('actionPanelTitle').textContent = titleMap[type] || type;
+    if (type === 'rename' || type === 'new-file' || type === 'new-folder') { nameWrap.classList.remove('d-none'); document.getElementById('actionName').value = type === 'rename' ? row.dataset.name : ''; }
+    if (type === 'move' || type === 'copy') destinationWrap.classList.remove('d-none');
+    if (type === 'properties') { buttons.classList.add('d-none'); content.textContent = strings.propertiesLoading; panel.show(); loadProperties(row.dataset.path, content); return; }
+    panel.show(); setTimeout(() => document.getElementById(type === 'move' || type === 'copy' ? 'actionDestination' : 'actionName').focus(), 200);
+  }
+  async function loadProperties(path, container) { try { const response = await fetch('/api/properties?path=' + encodeURIComponent(path), {headers: {'X-CSRF-Token': csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code); const p = data.properties; const rows = [[{{js (t "name")}}, p.name], [{{js (t "kind")}}, p.kind], [{{js (t "size")}}, formatBytes(p.size)], [{{js (t "modified")}}, formatTime(p.modified)], [{{js (t "entryCount")}}, p.entry_count || '—'], ['Mode', p.mode], ['Path', p.path]]; container.replaceChildren(...rows.map(([label, value]) => { const div = document.createElement('div'); div.className = 'd-flex justify-content-between gap-3 border-bottom py-2'; const a = document.createElement('span'); a.className='text-secondary'; a.textContent=label; const b=document.createElement('span'); b.className='text-end text-break'; b.textContent=value; div.append(a,b); return div; })); if (p.incomplete) { const note=document.createElement('p'); note.className='text-warning mt-3 mb-0'; note.textContent=strings.incomplete; container.append(note); } } catch (error) { container.textContent = errorText(error); } }
+
+  document.getElementById('actionSubmit').addEventListener('click', async () => { if (!actionContext) return; const {type, row, batch} = actionContext; setBusy(true); try { if (type === 'new-file') await formRequest('/do/newfile', {path:rawPath, filename:document.getElementById('actionName').value}); else if (type === 'new-folder') await formRequest('/do/newdir', {path:rawPath, dirname:document.getElementById('actionName').value}); else if (type === 'rename') await formRequest('/do/rename', {path:row.dataset.path, name:document.getElementById('actionName').value}); else if (type === 'move' || type === 'copy') { const endpoint = batch ? '/do/batch/' + type : '/do/' + type; if (batch) await request(endpoint, {listing_token:listingToken, entries:currentEntries(), destination:document.getElementById('actionDestination').value}); else await formRequest(endpoint, {path:row.dataset.path, destination:document.getElementById('actionDestination').value}); } panel.hide(); location.reload(); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
+
+  document.addEventListener('click', async event => { const button = event.target.closest('[data-action]'); if (!button) return; const row = button.closest('tr'); const type = button.dataset.action; if (type === 'rename' || type === 'move' || type === 'copy' || type === 'properties' || type === 'new-file' || type === 'new-folder') { openPanel(type, row, false); return; } if (type === 'delete') { deleteContext = {batch:false, row}; document.getElementById('deleteSummary').textContent = row.dataset.name; deleteModal.show(); return; } setBusy(true); try { if (type === 'zip') { const data = await formRequest('/do/zip', {path:row.dataset.path}); window.location.assign('/download/' + encodeURIComponent(data.path)); } else if (type === 'unzip') { await formRequest('/do/unzip', {path:row.dataset.path}); location.reload(); } else if (type === 'md5') { const data = await formRequest('/do/md5', {path:row.dataset.path}); showNotice('MD5: ' + data.hash); } } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
+  document.querySelectorAll('[data-batch-action]').forEach(button => button.addEventListener('click', async () => { const type = button.dataset.batchAction; const entries = currentEntries(); if (!entries.length) return; if (type === 'move' || type === 'copy') { openPanel(type, null, true); return; } if (type === 'delete') { deleteContext = {batch:true, entries}; document.getElementById('deleteSummary').textContent = entries.slice(0,3).map(item => item.name).join(', ') + (entries.length > 3 ? ' +' + (entries.length-3) : ''); deleteModal.show(); return; } if (type === 'download') { setBusy(true); try { const data = await request('/do/batch/download-zip', {listing_token:listingToken, entries}); window.location.assign(data.download_url); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } } }));
+  document.getElementById('confirmDelete').addEventListener('click', async () => { if (!deleteContext) return; setBusy(true); try { if (deleteContext.batch) await request('/do/batch/delete', {listing_token:listingToken, entries:deleteContext.entries}); else await formRequest('/do/rm', {path:deleteContext.row.dataset.path}); deleteModal.hide(); location.reload(); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
+  document.getElementById('logoutButton').addEventListener('click', async () => { try { const response = await fetch('/logout', {method:'POST', headers:{'X-CSRF-Token':csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); window.location.assign('/login'); } catch (error) { showNotice(errorText(error), true); } });
+
+  const input = document.getElementById('fileInput'); const drop = document.getElementById('dropZone'); const progress = document.getElementById('uploadProgress'); const progressBar = document.getElementById('uploadProgressBar');
+  async function uploadFile(file) { if (!file) return; setBusy(true); progress?.classList.remove('d-none'); if (progressBar) progressBar.style.width = '12%'; try { const data = new FormData(); data.append('file', file); const response = await fetch('/do/upload/' + encodeURIComponent(rawPath), {method:'POST', headers:{'X-CSRF-Token':csrf}, body:data}); const result = await response.json(); if (!response.ok || !result.ok) throw new Error(result.code); if (progressBar) progressBar.style.width = '100%'; location.reload(); } catch (error) { showNotice(errorText(error), true); progress?.classList.add('d-none'); } finally { setBusy(false); } }
+  input?.addEventListener('change', () => uploadFile(input.files[0]));
+  drop?.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('dragover'); }); drop?.addEventListener('dragleave', () => drop.classList.remove('dragover')); drop?.addEventListener('drop', event => { event.preventDefault(); drop.classList.remove('dragover'); uploadFile(event.dataTransfer.files[0]); });
+  const command = 'curl -H "Authorization: Bearer $GOFILE_API_TOKEN" -F "path=' + rawPath + '" -F "file=@/path/to/file" ' + window.location.origin + '/api/upload'; const commandEl=document.getElementById('apiCommand'); if (commandEl) commandEl.textContent=command; document.getElementById('copyApi')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(command); showNotice({{js (t "copied")}}); } catch (_) { showNotice(strings.operationFailed, true); } });
+})();
+</script>
 </body>
 </html>

@@ -1,17 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{.htmlLang}}">
+<html lang="{{.htmlLang}}" data-bs-theme="dark">
 {{template "public/header" .}}
-<body>
-<div class="wrap">
-  <div class="hd">
-    <a class="logo" href="/">goFile</a>
-  </div>
-  <div class="msg-wrap">
-    <div class="msg-box">
-      <p class="msg-text">{{.msg}}</p>
-      <a class="msg-link" href="{{.url}}">{{.title}}</a>
-    </div>
-  </div>
-</div>
-</body>
+<body><main class="app-shell"><a class="brand" href="/"><span class="brand-mark">› goFile</span></a><section class="empty-state mt-4"><p>{{.msg}}</p><a class="btn btn-primary" href="{{.url}}">{{.title}}</a></section></main></body>
 </html>

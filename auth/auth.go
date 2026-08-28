@@ -1,0 +1,377 @@
+// Package auth provides the small, server-side authentication primitives used by goFile.
+package auth
+
+import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	CookieName      = "gofile_session"
+	SessionDuration = 12 * time.Hour
+	TicketDuration  = time.Minute
+	ListingDuration = 5 * time.Minute
+
+	maxLoginFailures   = 5
+	loginCooldown      = time.Minute
+	maxTrackedLoginIPs = 4096
+)
+
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrRateLimited        = errors.New("too many login attempts")
+	ErrInvalidConfig      = errors.New("invalid authentication configuration")
+)
+
+// Config is populated exclusively from runtime environment variables.
+type Config struct {
+	Username      string
+	Password      string
+	SessionSecret string
+	APIToken      string
+	CookieSecure  bool
+}
+
+// ConfigFromEnv loads the mandatory single-administrator credentials.
+func ConfigFromEnv(cookieSecure bool) (Config, error) {
+	cfg := Config{
+		Username:      os.Getenv("GOFILE_ADMIN_USERNAME"),
+		Password:      os.Getenv("GOFILE_ADMIN_PASSWORD"),
+		SessionSecret: os.Getenv("GOFILE_SESSION_SECRET"),
+		APIToken:      os.Getenv("GOFILE_API_TOKEN"),
+		CookieSecure:  cookieSecure,
+	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// Validate rejects missing or predictably short server secrets. The administrator
+// password itself only needs to be non-empty because deployments may deliberately
+// use an externally managed secret with their own password policy.
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.Username) == "" || c.Password == "" || len(c.SessionSecret) < 32 || len(c.APIToken) < 32 {
+		return ErrInvalidConfig
+	}
+	return nil
+}
+
+type session struct {
+	Username string
+	CSRF     string
+	Expires  time.Time
+}
+
+type loginAttempt struct {
+	Failures    int
+	RetryAt     time.Time
+	LastAttempt time.Time
+}
+
+// ListingItem is a direct-child entry rendered into a listing page.
+type ListingItem struct {
+	Name    string
+	Version string
+}
+
+type listing struct {
+	SessionID string
+	Directory string
+	Items     map[string]string
+	Expires   time.Time
+}
+
+// ArchiveItem describes a root-relative item permitted by a download ticket.
+type ArchiveItem struct {
+	Path    string
+	Version string
+}
+
+type archiveTicket struct {
+	SessionID string
+	Items     []ArchiveItem
+	Expires   time.Time
+}
+
+// Manager keeps short-lived sessions and browser-only operation tickets in memory.
+// Restarting goFile deliberately invalidates all of them.
+type Manager struct {
+	config   Config
+	now      func() time.Time
+	mu       sync.Mutex
+	sessions map[string]session
+	attempts map[string]loginAttempt
+	listings map[string]listing
+	tickets  map[string]archiveTicket
+}
+
+// Info is attached to authenticated requests by the middleware.
+type Info struct {
+	Username  string
+	SessionID string
+	CSRF      string
+	Bearer    bool
+}
+
+func NewManager(config Config) (*Manager, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+	return &Manager{
+		config:   config,
+		now:      time.Now,
+		sessions: make(map[string]session),
+		attempts: make(map[string]loginAttempt),
+		listings: make(map[string]listing),
+		tickets:  make(map[string]archiveTicket),
+	}, nil
+}
+
+// Login validates the only configured administrator account and opens a session.
+func (m *Manager) Login(ip, username, password string) (Info, string, time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	m.cleanupLocked(now)
+
+	if attempt, ok := m.attempts[ip]; ok && now.Before(attempt.RetryAt) {
+		return Info{}, "", time.Time{}, ErrRateLimited
+	}
+	validUser := subtle.ConstantTimeCompare([]byte(username), []byte(m.config.Username)) == 1
+	validPassword := subtle.ConstantTimeCompare([]byte(password), []byte(m.config.Password)) == 1
+	if !validUser || !validPassword {
+		attempt, tracked := m.attempts[ip]
+		if !tracked && len(m.attempts) >= maxTrackedLoginIPs {
+			m.evictOldestAttemptLocked()
+		}
+		attempt.Failures++
+		attempt.LastAttempt = now
+		if attempt.Failures >= maxLoginFailures {
+			attempt.Failures = 0
+			attempt.RetryAt = now.Add(loginCooldown)
+		}
+		m.attempts[ip] = attempt
+		return Info{}, "", time.Time{}, ErrInvalidCredentials
+	}
+	delete(m.attempts, ip)
+
+	id, err := randomToken(32)
+	if err != nil {
+		return Info{}, "", time.Time{}, err
+	}
+	csrf, err := randomToken(32)
+	if err != nil {
+		return Info{}, "", time.Time{}, err
+	}
+	expires := now.Add(SessionDuration)
+	m.sessions[id] = session{Username: m.config.Username, CSRF: csrf, Expires: expires}
+	return Info{Username: m.config.Username, SessionID: id, CSRF: csrf}, m.signSessionID(id), expires, nil
+}
+
+func (m *Manager) SessionFromRequest(r *http.Request) (Info, bool) {
+	cookie, err := r.Cookie(CookieName)
+	if err != nil {
+		return Info{}, false
+	}
+	id, ok := m.verifySessionCookie(cookie.Value)
+	if !ok {
+		return Info{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	m.cleanupLocked(now)
+	s, ok := m.sessions[id]
+	if !ok || !now.Before(s.Expires) {
+		return Info{}, false
+	}
+	return Info{Username: s.Username, SessionID: id, CSRF: s.CSRF}, true
+}
+
+func (m *Manager) IsBearerToken(value string) bool {
+	if !strings.HasPrefix(value, "Bearer ") {
+		return false
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(value, "Bearer "))
+	return token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(m.config.APIToken)) == 1
+}
+
+func (m *Manager) CheckCSRF(info Info, supplied string) bool {
+	if info.Bearer {
+		return true
+	}
+	return info.SessionID != "" && supplied != "" && subtle.ConstantTimeCompare([]byte(info.CSRF), []byte(supplied)) == 1
+}
+
+func (m *Manager) Logout(info Info) {
+	if info.SessionID == "" {
+		return
+	}
+	m.mu.Lock()
+	delete(m.sessions, info.SessionID)
+	m.mu.Unlock()
+}
+
+func (m *Manager) Cookie(value string, expires time.Time) *http.Cookie {
+	return &http.Cookie{
+		Name:     CookieName,
+		Value:    value,
+		Path:     "/",
+		Expires:  expires,
+		MaxAge:   int(SessionDuration.Seconds()),
+		HttpOnly: true,
+		Secure:   m.config.CookieSecure,
+		SameSite: http.SameSiteStrictMode,
+	}
+}
+
+func ExpiredCookie() *http.Cookie {
+	return &http.Cookie{Name: CookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode}
+}
+
+// IssueListing creates a short-lived, session-bound permission envelope for the
+// exact direct children rendered in a browser listing.
+func (m *Manager) IssueListing(sessionID, directory string, entries []ListingItem) (string, error) {
+	if sessionID == "" {
+		return "", errors.New("browser session required")
+	}
+	token, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
+	items := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		items[entry.Name] = entry.Version
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	m.cleanupLocked(now)
+	m.listings[token] = listing{SessionID: sessionID, Directory: directory, Items: items, Expires: now.Add(ListingDuration)}
+	return token, nil
+}
+
+// ConsumeListing verifies a listing token without consuming it. It remains valid
+// for short batch-operation retries until expiry.
+func (m *Manager) ReadListing(sessionID, token string) (string, map[string]string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	m.cleanupLocked(now)
+	listing, ok := m.listings[token]
+	if !ok || listing.SessionID != sessionID || !now.Before(listing.Expires) {
+		return "", nil, false
+	}
+	items := make(map[string]string, len(listing.Items))
+	for name, version := range listing.Items {
+		items[name] = version
+	}
+	return listing.Directory, items, true
+}
+
+func (m *Manager) IssueArchiveTicket(sessionID string, items []ArchiveItem) (string, error) {
+	if sessionID == "" {
+		return "", errors.New("browser session required")
+	}
+	token, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	m.cleanupLocked(now)
+	m.tickets[token] = archiveTicket{SessionID: sessionID, Items: append([]ArchiveItem(nil), items...), Expires: now.Add(TicketDuration)}
+	return token, nil
+}
+
+// ConsumeArchiveTicket is atomic and makes a ticket unusable after one request.
+func (m *Manager) ConsumeArchiveTicket(sessionID, token string) ([]ArchiveItem, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	m.cleanupLocked(now)
+	ticket, ok := m.tickets[token]
+	if !ok || ticket.SessionID != sessionID || !now.Before(ticket.Expires) {
+		return nil, false
+	}
+	delete(m.tickets, token)
+	return append([]ArchiveItem(nil), ticket.Items...), true
+}
+
+func (m *Manager) signSessionID(id string) string {
+	mac := hmac.New(sha256.New, []byte(m.config.SessionSecret))
+	_, _ = mac.Write([]byte(id))
+	return id + "." + hex.EncodeToString(mac.Sum(nil))
+}
+
+func (m *Manager) verifySessionCookie(value string) (string, bool) {
+	parts := strings.Split(value, ".")
+	if len(parts) != 2 || len(parts[0]) != 64 {
+		return "", false
+	}
+	expected := m.signSessionID(parts[0])
+	if subtle.ConstantTimeCompare([]byte(expected), []byte(value)) != 1 {
+		return "", false
+	}
+	return parts[0], true
+}
+
+func (m *Manager) evictOldestAttemptLocked() {
+	var oldestIP string
+	var oldest time.Time
+	for ip, attempt := range m.attempts {
+		if oldestIP == "" || attempt.LastAttempt.Before(oldest) {
+			oldestIP = ip
+			oldest = attempt.LastAttempt
+		}
+	}
+	if oldestIP != "" {
+		delete(m.attempts, oldestIP)
+	}
+}
+
+func (m *Manager) cleanupLocked(now time.Time) {
+	for id, s := range m.sessions {
+		if !now.Before(s.Expires) {
+			delete(m.sessions, id)
+		}
+	}
+	for token, listing := range m.listings {
+		if !now.Before(listing.Expires) {
+			delete(m.listings, token)
+		}
+	}
+	for token, ticket := range m.tickets {
+		if !now.Before(ticket.Expires) {
+			delete(m.tickets, token)
+		}
+	}
+	for ip, attempt := range m.attempts {
+		if !attempt.RetryAt.IsZero() && !now.Before(attempt.RetryAt) {
+			delete(m.attempts, ip)
+			continue
+		}
+		if attempt.RetryAt.IsZero() && !attempt.LastAttempt.IsZero() && !now.Before(attempt.LastAttempt.Add(loginCooldown)) {
+			delete(m.attempts, ip)
+		}
+	}
+}
+
+func randomToken(bytes int) (string, error) {
+	buf := make([]byte, bytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
