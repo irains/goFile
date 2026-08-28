@@ -16,41 +16,71 @@
 
 ## 启动前的安全配置
 
-goFile 默认强制登录。启动前必须配置以下环境变量：
+goFile 默认强制登录。管理员密码只接受 **bcrypt hash**，不接受明文密码。可用环境变量或命令行参数提供配置，未提供的命令行参数会逐字段回退到对应环境变量，显式提供的参数只覆盖自身字段。管理员账号不能为空；密码 hash 必须是 cost 为 10–12 的有效 bcrypt hash；会话签名密钥及 API Token 至少 32 个字符。
 
-| 变量 | 说明 |
-| --- | --- |
-| `GOFILE_ADMIN_USERNAME` | 唯一管理员账号 |
-| `GOFILE_ADMIN_PASSWORD` | 管理员密码 |
-| `GOFILE_SESSION_SECRET` | 会话签名密钥，至少 32 个字符，建议使用随机 32 字节以上值 |
-| `GOFILE_API_TOKEN` | 脚本上传 Token，至少 32 个字符，建议使用随机 32 字节以上值 |
+| 环境变量 | 可选命令行参数 | 说明 |
+| --- | --- | --- |
+| `GOFILE_ADMIN_USERNAME` | `-admin-username` | 唯一管理员账号 |
+| `GOFILE_ADMIN_PASSWORD_HASH` | `-admin-password-hash` | 管理员密码的 bcrypt hash |
+| `GOFILE_SESSION_SECRET` | `-session-secret` | 会话签名密钥，至少 32 个字符，建议使用随机 32 字节以上值 |
+| `GOFILE_API_TOKEN` | `-api-token` | 脚本上传 Token，至少 32 个字符，建议使用随机 32 字节以上值 |
 
-PowerShell 示例：
+`GOFILE_ADMIN_PASSWORD` 和 `-admin-password` 已不再支持。若已配置有效的 bcrypt hash，残留的 `GOFILE_ADMIN_PASSWORD` 不会阻止短暂迁移，但它绝不会作为密码来源，仍应立即删除。若旧密码曾以命令行、CI 日志、服务定义或其他明文方式出现，请在迁移前后轮换该密码，而不仅是将原值生成 hash。
+
+### 生成管理员密码 hash
+
+使用交互式子命令生成 bcrypt hash。它要求真实终端、两次无回显输入密码，且只将 hash 输出到 stdout，不会创建或修改任何配置文件：
+
+```powershell
+$hash = & .\goFile.exe hash-password
+$env:GOFILE_ADMIN_PASSWORD_HASH = $hash
+Remove-Item Env:\GOFILE_ADMIN_PASSWORD -ErrorAction SilentlyContinue
+```
+
+```sh
+export GOFILE_ADMIN_PASSWORD_HASH="$(./goFile hash-password)"
+unset GOFILE_ADMIN_PASSWORD
+```
+
+bcrypt 对输入限制为 72 **字节**，超出时该命令会拒绝生成 hash。bcrypt hash 本身并非明文，但泄露后仍可用于离线猜测，因此也必须作为敏感凭据保护，不得提交到仓库、记录到日志、放入 URL 或公开的部署定义。
+
+环境变量或外部密钥管理器仍是生产环境的推荐配置方式。命令行参数中的 hash、会话密钥和 Token 可能出现在 shell 历史、进程列表、服务定义、CI 日志和监控采集中。命令行模式只适合短期、本机受控调试。
+
+PowerShell 环境变量示例：
 
 ```powershell
 $env:GOFILE_ADMIN_USERNAME = "admin"
-$env:GOFILE_ADMIN_PASSWORD = "use-a-long-unique-password"
+$env:GOFILE_ADMIN_PASSWORD_HASH = $hash
 $env:GOFILE_SESSION_SECRET = "replace-with-a-random-secret-of-at-least-32-characters"
 $env:GOFILE_API_TOKEN = "replace-with-a-separate-random-token-of-at-least-32-chars"
 ./goFile.exe -path "D:\data"
 ```
 
-Linux/macOS 示例：
+Linux/macOS 环境变量示例：
 
 ```sh
 export GOFILE_ADMIN_USERNAME='admin'
-export GOFILE_ADMIN_PASSWORD='use-a-long-unique-password'
+# 以下值由 ./goFile hash-password 的输出提供。
+export GOFILE_ADMIN_PASSWORD_HASH='<bcrypt-hash>'
 export GOFILE_SESSION_SECRET='replace-with-a-random-secret-of-at-least-32-characters'
 export GOFILE_API_TOKEN='replace-with-a-separate-random-token-of-at-least-32-chars'
 ./goFile -path /srv/files
 ```
 
-不要把真实凭据提交到仓库、写进 shell 历史或放进 URL。
+完整的参数启动示例（仅适合短期本地调试，`<bcrypt-hash>` 替换为 `hash-password` 的输出）：
+
+```powershell
+./goFile.exe -path "D:\data" -admin-username "admin" -admin-password-hash "<bcrypt-hash>" -session-secret "replace-with-a-random-secret-of-at-least-32-characters" -api-token "replace-with-a-separate-random-token-of-at-least-32-chars"
+```
 
 ## 参数
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
+| `-admin-username` | 空 | 管理员账号；显式提供时覆盖 `GOFILE_ADMIN_USERNAME` |
+| `-admin-password-hash` | 空 | bcrypt 管理员密码 hash；显式提供时覆盖 `GOFILE_ADMIN_PASSWORD_HASH`，cost 为 10–12 |
+| `-session-secret` | 空 | 会话签名密钥；显式提供时覆盖 `GOFILE_SESSION_SECRET`，至少 32 个字符 |
+| `-api-token` | 空 | API 上传 Token；显式提供时覆盖 `GOFILE_API_TOKEN`，至少 32 个字符 |
 | `-path` | 当前目录 | 受管文件根目录 |
 | `-port` | `8089` | 服务端口 |
 | `-host` | `127.0.0.1` | 监听地址。要在局域网访问时需显式设置，例如 `0.0.0.0` |

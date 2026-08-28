@@ -13,10 +13,14 @@ import (
 
 func testManager(t *testing.T) *auth.Manager {
 	t.Helper()
+	passwordHash, err := auth.GeneratePasswordHash([]byte("a durable password"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	manager, err := auth.NewManager(auth.Config{
-		Username: "admin", Password: "a durable password",
+		Username: "admin", PasswordHash: passwordHash,
 		SessionSecret: "0123456789abcdef0123456789abcdef",
-		APIToken: "abcdef0123456789abcdef0123456789",
+		APIToken:      "abcdef0123456789abcdef0123456789",
 	})
 	if err != nil { t.Fatal(err) }
 	return manager
@@ -40,17 +44,27 @@ func TestRouterRequiresAuthentication(t *testing.T) {
 	previousRoot, previousReader, previousUploader, previousTemplates := conf.GoFile, reader, uploader, templateSets
 	conf.GoFile, reader, uploader = t.TempDir(), false, false
 	t.Cleanup(func() { conf.GoFile, reader, uploader, templateSets = previousRoot, previousReader, previousUploader, previousTemplates })
-	if err := os.WriteFile(conf.GoFile+string(os.PathSeparator)+"a.txt", []byte("a"), 0644); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(conf.GoFile+string(os.PathSeparator)+"a.txt", []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	router := newRouter(testManager(t))
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusFound { t.Fatalf("expected redirect, got %d", response.Code) }
+	if response.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d", response.Code)
+	}
 	cookie := loginCookie(t, router)
-	request = httptest.NewRequest(http.MethodGet, "/", nil); request.AddCookie(cookie)
-	response = httptest.NewRecorder(); router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK { t.Fatalf("authenticated list = %d", response.Code) }
-	if got := response.Header().Get("Cache-Control"); got != "no-store, private" { t.Fatalf("directory cache-control = %q", got) }
+	request = httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("authenticated list = %d", response.Code)
+	}
+	if got := response.Header().Get("Cache-Control"); got != "no-store, private" {
+		t.Fatalf("directory cache-control = %q", got)
+	}
 }
 
 func TestBatchDownloadRouteDoesNotConflictWithFileDownloads(t *testing.T) {

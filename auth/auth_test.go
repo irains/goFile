@@ -4,25 +4,96 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
-func testConfig() Config {
+const testPassword = "a durable password"
+
+func testConfig(t *testing.T) Config {
+	t.Helper()
+	hash, err := GeneratePasswordHash([]byte(testPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return Config{
 		Username:      "admin",
-		Password:      "a durable password",
+		PasswordHash:  hash,
 		SessionSecret: "0123456789abcdef0123456789abcdef",
 		APIToken:      "abcdef0123456789abcdef0123456789",
 	}
 }
 
-func TestLoginSessionAndLogout(t *testing.T) {
-	manager, err := NewManager(testConfig())
+func TestGeneratePasswordHash(t *testing.T) {
+	first, err := GeneratePasswordHash([]byte(testPassword))
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, signed, expiry, err := manager.Login("127.0.0.1", "admin", "a durable password")
+	second, err := GeneratePasswordHash([]byte(testPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("bcrypt hashes must use distinct salts")
+	}
+	cost, err := bcrypt.Cost([]byte(first))
+	if err != nil || cost != PasswordHashCost {
+		t.Fatalf("bcrypt cost = %d, %v", cost, err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(first), []byte(testPassword)); err != nil {
+		t.Fatal(err)
+	}
+	for _, password := range [][]byte{nil, []byte(strings.Repeat("x", maxPasswordBytes+1))} {
+		if _, err := GeneratePasswordHash(password); !errors.Is(err, ErrInvalidPassword) && !errors.Is(err, ErrPasswordTooLong) {
+			t.Fatalf("invalid password error = %v", err)
+	}
+}
+
+func TestConfigRejectsInvalidPasswordHashes(t *testing.T) {
+	config := testConfig(t)
+	for _, mutate := range []func(*Config){
+		func(c *Config) { c.PasswordHash = "" },
+		func(c *Config) { c.PasswordHash = "not-a-bcrypt-hash" },
+		func(c *Config) { c.Username = " " },
+		func(c *Config) { c.SessionSecret = "short" },
+		func(c *Config) { c.APIToken = "short" },
+	} {
+		candidate := config
+		mutate(&candidate)
+		if !errors.Is(candidate.Validate(), ErrInvalidConfig) {
+			t.Fatalf("invalid configuration was accepted")
+		}
+	}
+
+	weak, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.PasswordHash = string(weak)
+	if !errors.Is(config.Validate(), ErrInvalidConfig) {
+		t.Fatal("weak bcrypt hash was accepted")
+	}
+
+	tooStrong, err := bcrypt.GenerateFromPassword([]byte(testPassword), maxPasswordHashCost+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.PasswordHash = string(tooStrong)
+	if !errors.Is(config.Validate(), ErrInvalidConfig) {
+		t.Fatal("impractically expensive bcrypt hash was accepted")
+	}
+}
+
+func TestLoginSessionAndLogout(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, signed, expiry, err := manager.Login("127.0.0.1", "admin", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,12 +112,218 @@ func TestLoginSessionAndLogout(t *testing.T) {
 	}
 }
 
-func TestBearerToken(t *testing.T) {
-	manager, err := NewManager(testConfig())
+func TestLoginRejectsWrongUsernameAndPassword(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !manager.IsBearerToken("Bearer " + testConfig().APIToken) {
+	for _, credentials := range [][2]string{{"wrong", testPassword}, {"admin", "wrong"}} {
+		if _, _, _, err := manager.Login("127.0.0.1", credentials[0], credentials[1]); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("login error = %v", err)
+		}
+	}
+}
+
+func TestLoginChecksPasswordOutsideManagerLock(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	manager.comparePassword = func([]byte, []byte) error {
+		close(started)
+		<-release
+		return errors.New("wrong password")
+	}
+	go func() {
+		_, _, _, _ = manager.Login("127.0.0.1", "wrong", "wrong")
+		close(finished)
+	}()
+	<-started
+
+	acquired := make(chan struct{})
+	go func() {
+		manager.mu.Lock()
+		close(acquired)
+		manager.mu.Unlock()
+	}()
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		close(release)
+		<-finished
+		t.Fatal("bcrypt comparison held the manager lock")
+	}
+	close(release)
+	<-finished
+}
+
+func TestLoginChecksPasswordForWrongUsername(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	manager.comparePassword = func([]byte, []byte) error {
+		called = true
+		return errors.New("wrong password")
+	}
+	if _, _, _, err := manager.Login("127.0.0.1", "wrong", testPassword); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("login error = %v", err)
+	}
+	if !called {
+		t.Fatal("wrong username skipped password verification")
+	}
+}
+
+func TestLoginClearsCheckingAfterPasswordComparison(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.comparePassword = func([]byte, []byte) error { return errors.New("wrong password") }
+	if _, _, _, err := manager.Login("127.0.0.1", "admin", "wrong"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("first login error = %v", err)
+	}
+	if _, _, _, err := manager.Login("127.0.0.1", "admin", "wrong"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("follow-up login error = %v", err)
+	}
+}
+
+func TestLoginRejectsInvalidPasswordInput(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, password := range []string{"", strings.Repeat("x", maxPasswordBytes+1)} {
+		if _, _, _, err := manager.Login("127.0.0.1", "admin", password); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("password length %d error = %v", len(password), err)
+		}
+	}
+}
+
+func TestLoginAllowsOnlyOneCheckPerIP(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan error, 1)
+	manager.comparePassword = func([]byte, []byte) error {
+		close(started)
+		<-release
+		return errors.New("wrong password")
+	}
+	go func() {
+		_, _, _, err := manager.Login("127.0.0.1", "admin", "wrong")
+		finished <- err
+	}()
+	<-started
+
+	if _, _, _, err := manager.Login("127.0.0.1", "admin", "wrong"); !errors.Is(err, ErrRateLimited) {
+		close(release)
+		<-finished
+		t.Fatalf("concurrent login error = %v", err)
+	}
+	close(release)
+	if err := <-finished; !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("first login error = %v", err)
+	}
+}
+
+func TestLoginLimitsConcurrentPasswordChecks(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{}, maxConcurrentPasswordChecks)
+	release := make(chan struct{})
+	finished := make(chan error, maxConcurrentPasswordChecks)
+	var mu sync.Mutex
+	checks := 0
+	manager.comparePassword = func([]byte, []byte) error {
+		mu.Lock()
+		checks++
+		mu.Unlock()
+		started <- struct{}{}
+		<-release
+		return errors.New("wrong password")
+	}
+	for i := 0; i < maxConcurrentPasswordChecks; i++ {
+		go func(i int) {
+			_, _, _, err := manager.Login("ip-"+strconv.Itoa(i), "admin", "wrong")
+			finished <- err
+		}(i)
+	}
+	for i := 0; i < maxConcurrentPasswordChecks; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatal("password checks did not reach the configured limit")
+		}
+	}
+	if _, _, _, err := manager.Login("overflow", "admin", "wrong"); !errors.Is(err, ErrRateLimited) {
+		close(release)
+		for i := 0; i < maxConcurrentPasswordChecks; i++ {
+			<-finished
+		}
+		t.Fatalf("over-limit login error = %v", err)
+	}
+	mu.Lock()
+	checkCount := checks
+	mu.Unlock()
+	if checkCount != maxConcurrentPasswordChecks {
+		close(release)
+		for i := 0; i < maxConcurrentPasswordChecks; i++ {
+			<-finished
+		}
+		t.Fatalf("password comparisons = %d, want %d", checkCount, maxConcurrentPasswordChecks)
+	}
+	close(release)
+	for i := 0; i < maxConcurrentPasswordChecks; i++ {
+		if err := <-finished; !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("completed login error = %v", err)
+		}
+	}
+}
+
+func TestLoginClearsCheckingAfterPasswordCheckCapacityIsFull(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < cap(manager.passwordChecks); i++ {
+		manager.passwordChecks <- struct{}{}
+	}
+	if _, _, _, err := manager.Login("127.0.0.1", "admin", "wrong"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("saturated login error = %v", err)
+	}
+	manager.mu.Lock()
+	attempt, tracked := manager.attempts["127.0.0.1"]
+	manager.mu.Unlock()
+	if !tracked || attempt.Checking {
+		t.Fatalf("checking state after saturation = %#v, tracked = %t", attempt, tracked)
+	}
+	for i := 0; i < cap(manager.passwordChecks); i++ {
+		<-manager.passwordChecks
+	}
+	manager.comparePassword = func([]byte, []byte) error { return errors.New("wrong password") }
+	if _, _, _, err := manager.Login("127.0.0.1", "admin", "wrong"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("login after released capacity error = %v", err)
+	}
+}
+
+func TestBearerToken(t *testing.T) {
+	config := testConfig(t)
+	manager, err := NewManager(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manager.IsBearerToken("Bearer " + config.APIToken) {
 		t.Fatal("expected valid token")
 	}
 	if manager.IsBearerToken("Bearer wrong") {
@@ -55,10 +332,11 @@ func TestBearerToken(t *testing.T) {
 }
 
 func TestLoginAttemptTrackingIsBounded(t *testing.T) {
-	manager, err := NewManager(testConfig())
+	manager, err := NewManager(testConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+	manager.comparePassword = func([]byte, []byte) error { return errors.New("wrong password") }
 	for i := 0; i < maxTrackedLoginIPs; i++ {
 		if _, _, _, err := manager.Login("ip-"+strconv.Itoa(i), "admin", "wrong"); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("failure %d = %v", i, err)
@@ -72,8 +350,28 @@ func TestLoginAttemptTrackingIsBounded(t *testing.T) {
 	}
 }
 
+func TestLoginDoesNotEvictInFlightAttempt(t *testing.T) {
+	manager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.comparePassword = func([]byte, []byte) error { return errors.New("wrong password") }
+	for i := 0; i < maxTrackedLoginIPs; i++ {
+		manager.mu.Lock()
+		manager.attempts["ip-"+strconv.Itoa(i)] = loginAttempt{
+			LastAttempt: time.Unix(int64(i+1), 0),
+			Checking:    true,
+		}
+		manager.mu.Unlock()
+	}
+
+	if _, _, _, err := manager.Login("overflow", "admin", "wrong"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("full in-flight tracking error = %v", err)
+	}
+}
+
 func TestArchiveTicketIsSessionBoundAndOneUse(t *testing.T) {
-	manager, err := NewManager(testConfig())
+	manager, err := NewManager(testConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}

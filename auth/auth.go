@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -21,9 +23,10 @@ const (
 	TicketDuration  = time.Minute
 	ListingDuration = 5 * time.Minute
 
-	maxLoginFailures   = 5
-	loginCooldown      = time.Minute
-	maxTrackedLoginIPs = 4096
+	maxLoginFailures             = 5
+	loginCooldown                = time.Minute
+	maxTrackedLoginIPs           = 4096
+	maxConcurrentPasswordChecks  = 4
 )
 
 var (
@@ -32,35 +35,45 @@ var (
 	ErrInvalidConfig      = errors.New("invalid authentication configuration")
 )
 
-// Config is populated exclusively from runtime environment variables.
+// Config holds the single-administrator credentials and session settings.
 type Config struct {
 	Username      string
-	Password      string
+	PasswordHash  string
 	SessionSecret string
 	APIToken      string
 	CookieSecure  bool
 }
 
-// ConfigFromEnv loads the mandatory single-administrator credentials.
-func ConfigFromEnv(cookieSecure bool) (Config, error) {
-	cfg := Config{
-		Username:      os.Getenv("GOFILE_ADMIN_USERNAME"),
-		Password:      os.Getenv("GOFILE_ADMIN_PASSWORD"),
-		SessionSecret: os.Getenv("GOFILE_SESSION_SECRET"),
-		APIToken:      os.Getenv("GOFILE_API_TOKEN"),
+// ConfigFromLookup loads configuration without validating it. Callers that merge
+// multiple configuration sources can apply their precedence rules before using
+// Config.Validate.
+func ConfigFromLookup(lookup func(string) string, cookieSecure bool) Config {
+	if lookup == nil {
+		lookup = func(string) string { return "" }
+	}
+	return Config{
+		Username:      lookup("GOFILE_ADMIN_USERNAME"),
+		PasswordHash:  lookup("GOFILE_ADMIN_PASSWORD_HASH"),
+		SessionSecret: lookup("GOFILE_SESSION_SECRET"),
+		APIToken:      lookup("GOFILE_API_TOKEN"),
 		CookieSecure:  cookieSecure,
 	}
+}
+
+// ConfigFromEnv loads and validates the mandatory single-administrator credentials.
+func ConfigFromEnv(cookieSecure bool) (Config, error) {
+	cfg := ConfigFromLookup(os.Getenv, cookieSecure)
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
 }
 
-// Validate rejects missing or predictably short server secrets. The administrator
-// password itself only needs to be non-empty because deployments may deliberately
-// use an externally managed secret with their own password policy.
+// Validate rejects missing credentials, malformed password hashes, and
+// predictably short server secrets.
 func (c Config) Validate() error {
-	if strings.TrimSpace(c.Username) == "" || c.Password == "" || len(c.SessionSecret) < 32 || len(c.APIToken) < 32 {
+	if strings.TrimSpace(c.Username) == "" || !validPasswordHash(c.PasswordHash) ||
+		len(c.SessionSecret) < 32 || len(c.APIToken) < 32 {
 		return ErrInvalidConfig
 	}
 	return nil
@@ -76,6 +89,7 @@ type loginAttempt struct {
 	Failures    int
 	RetryAt     time.Time
 	LastAttempt time.Time
+	Checking    bool
 }
 
 // ListingItem is a direct-child entry rendered into a listing page.
@@ -106,13 +120,15 @@ type archiveTicket struct {
 // Manager keeps short-lived sessions and browser-only operation tickets in memory.
 // Restarting goFile deliberately invalidates all of them.
 type Manager struct {
-	config   Config
-	now      func() time.Time
-	mu       sync.Mutex
-	sessions map[string]session
-	attempts map[string]loginAttempt
-	listings map[string]listing
-	tickets  map[string]archiveTicket
+	config          Config
+	now             func() time.Time
+	comparePassword func([]byte, []byte) error // test seam for bcrypt verification
+	passwordChecks  chan struct{}
+	mu              sync.Mutex
+	sessions        map[string]session
+	attempts        map[string]loginAttempt
+	listings        map[string]listing
+	tickets         map[string]archiveTicket
 }
 
 // Info is attached to authenticated requests by the middleware.
@@ -128,32 +144,65 @@ func NewManager(config Config) (*Manager, error) {
 		return nil, err
 	}
 	return &Manager{
-		config:   config,
-		now:      time.Now,
-		sessions: make(map[string]session),
-		attempts: make(map[string]loginAttempt),
-		listings: make(map[string]listing),
-		tickets:  make(map[string]archiveTicket),
+		config:          config,
+		now:             time.Now,
+		comparePassword: bcrypt.CompareHashAndPassword,
+		passwordChecks:  make(chan struct{}, maxConcurrentPasswordChecks),
+		sessions:        make(map[string]session),
+		attempts:        make(map[string]loginAttempt),
+		listings:        make(map[string]listing),
+		tickets:         make(map[string]archiveTicket),
 	}, nil
 }
 
 // Login validates the only configured administrator account and opens a session.
 func (m *Manager) Login(ip, username, password string) (Info, string, time.Time, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	now := m.now()
 	m.cleanupLocked(now)
-
-	if attempt, ok := m.attempts[ip]; ok && now.Before(attempt.RetryAt) {
+	attempt, tracked := m.attempts[ip]
+	if (tracked && now.Before(attempt.RetryAt)) || attempt.Checking {
+		m.mu.Unlock()
 		return Info{}, "", time.Time{}, ErrRateLimited
 	}
-	validUser := subtle.ConstantTimeCompare([]byte(username), []byte(m.config.Username)) == 1
-	validPassword := subtle.ConstantTimeCompare([]byte(password), []byte(m.config.Password)) == 1
-	if !validUser || !validPassword {
-		attempt, tracked := m.attempts[ip]
-		if !tracked && len(m.attempts) >= maxTrackedLoginIPs {
-			m.evictOldestAttemptLocked()
+	if !tracked && len(m.attempts) >= maxTrackedLoginIPs {
+		if !m.evictOldestAttemptLocked() {
+			m.mu.Unlock()
+			return Info{}, "", time.Time{}, ErrRateLimited
 		}
+	}
+	attempt.Checking = true
+	m.attempts[ip] = attempt
+	m.mu.Unlock()
+
+	select {
+	case m.passwordChecks <- struct{}{}:
+		defer func() { <-m.passwordChecks }()
+	default:
+		m.mu.Lock()
+		if attempt, ok := m.attempts[ip]; ok {
+			attempt.Checking = false
+			m.attempts[ip] = attempt
+		}
+		m.mu.Unlock()
+		return Info{}, "", time.Time{}, ErrRateLimited
+	}
+
+	passwordBytes := []byte(password)
+	defer ClearPassword(passwordBytes)
+	candidatePassword, passwordValid := passwordForComparison(passwordBytes)
+	validUser := subtle.ConstantTimeCompare([]byte(username), []byte(m.config.Username)) == 1
+	passwordMatches := m.comparePassword([]byte(m.config.PasswordHash), candidatePassword) == nil
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now = m.now()
+	attempt, tracked = m.attempts[ip]
+	if !tracked || now.Before(attempt.RetryAt) || !attempt.Checking {
+		return Info{}, "", time.Time{}, ErrRateLimited
+	}
+	attempt.Checking = false
+	if !validUser || !passwordValid || !passwordMatches {
 		attempt.Failures++
 		attempt.LastAttempt = now
 		if attempt.Failures >= maxLoginFailures {
@@ -327,18 +376,23 @@ func (m *Manager) verifySessionCookie(value string) (string, bool) {
 	return parts[0], true
 }
 
-func (m *Manager) evictOldestAttemptLocked() {
+func (m *Manager) evictOldestAttemptLocked() bool {
 	var oldestIP string
 	var oldest time.Time
 	for ip, attempt := range m.attempts {
+		if attempt.Checking {
+			continue
+		}
 		if oldestIP == "" || attempt.LastAttempt.Before(oldest) {
 			oldestIP = ip
 			oldest = attempt.LastAttempt
 		}
 	}
-	if oldestIP != "" {
-		delete(m.attempts, oldestIP)
+	if oldestIP == "" {
+		return false
 	}
+	delete(m.attempts, oldestIP)
+	return true
 }
 
 func (m *Manager) cleanupLocked(now time.Time) {
@@ -358,6 +412,9 @@ func (m *Manager) cleanupLocked(now time.Time) {
 		}
 	}
 	for ip, attempt := range m.attempts {
+		if attempt.Checking {
+			continue
+		}
 		if !attempt.RetryAt.IsZero() && !now.Before(attempt.RetryAt) {
 			delete(m.attempts, ip)
 			continue

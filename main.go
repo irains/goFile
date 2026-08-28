@@ -351,6 +351,10 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		password := c.PostForm("password")
 		info, signedID, expiry, err := manager.Login(c.ClientIP(), username, password)
 		if err != nil {
+			if !errors.Is(err, auth.ErrInvalidCredentials) && !errors.Is(err, auth.ErrRateLimited) {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
 			status := http.StatusUnauthorized
 			if errors.Is(err, auth.ErrRateLimited) {
 				status = http.StatusTooManyRequests
@@ -871,33 +875,26 @@ func isLoopbackHost(host string) bool {
 }
 
 func parseConfig() (*auth.Manager, error) {
-	flag.StringVar(&conf.GoFile, "path", "./", "managed directory")
-	flag.StringVar(&conf.GoFilePort, "port", "8089", "web port")
-	flag.StringVar(&conf.Host, "host", "127.0.0.1", "listen host")
-	flag.BoolVar(&reader, "r", false, "read-only mode")
-	flag.BoolVar(&uploader, "ru", false, "read-only mode with upload")
-	flag.BoolVar(&cookieSecure, "cookie-secure", false, "mark session cookies Secure (required behind HTTPS)")
-	flag.BoolVar(&allowInsecureLAN, "allow-insecure-lan", false, "allow plain HTTP and non-Secure cookies on a non-loopback host (unsafe)")
-	flag.Parse()
-	if uploader {
-		reader = true
+	startup, err := parseStartupConfig(os.Args[1:], os.Getenv, os.Stderr)
+	if err != nil {
+		return nil, err
 	}
-	if !isLoopbackHost(conf.Host) && !cookieSecure && !allowInsecureLAN {
-		return nil, errors.New("refusing non-loopback HTTP with non-Secure session cookies: use HTTPS with -cookie-secure, or explicitly acknowledge the risk with -allow-insecure-lan")
-	}
-	absolute, err := filepath.Abs(conf.GoFile)
+
+	absolute, err := filepath.Abs(startup.Path)
 	if err != nil {
 		return nil, err
 	}
 	conf.GoFile = filepath.Clean(absolute)
+	conf.GoFilePort = startup.Port
+	conf.Host = startup.Host
+	reader = startup.ReadOnly
+	uploader = startup.UploadReadOnly
+	cookieSecure = startup.CookieSecure
+	allowInsecureLAN = startup.AllowInsecureLAN
 	if _, err := utils.Root(); err != nil {
 		return nil, fmt.Errorf("invalid -path: %w", err)
 	}
-	config, err := auth.ConfigFromEnv(cookieSecure)
-	if err != nil {
-		return nil, fmt.Errorf("authentication configuration error: set GOFILE_ADMIN_USERNAME, GOFILE_ADMIN_PASSWORD, GOFILE_SESSION_SECRET (at least 32 characters), and GOFILE_API_TOKEN (at least 32 characters)")
-	}
-	return auth.NewManager(config)
+	return auth.NewManager(startup.Auth)
 }
 
 func localIPs() []string {
@@ -931,8 +928,19 @@ func localIPs() []string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "hash-password" {
+		if err := runHashPasswordCommand(os.Args[2:], terminalPasswordPrompter{file: os.Stdin}, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return
+	}
+
 	manager, err := parseConfig()
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
