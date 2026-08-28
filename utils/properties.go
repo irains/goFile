@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"goFile/auth"
 	"io/fs"
 	"os"
@@ -12,6 +13,8 @@ const (
 	maxPropertyEntries = 100000
 	maxPropertyBytes   = int64(2 << 30)
 )
+
+var errPropertyScanLimit = errors.New("property scan limit reached")
 
 // Properties holds read-only, portable information about a managed item.
 type Properties struct {
@@ -64,7 +67,7 @@ func GetProperties(rawPath string) (Properties, error) {
 		count++
 		if count > maxPropertyEntries {
 			incomplete = true
-			return fs.SkipAll
+			return errPropertyScanLimit
 		}
 		info, err := entry.Info()
 		if err != nil || info.Mode()&os.ModeSymlink != 0 {
@@ -75,15 +78,21 @@ func GetProperties(rawPath string) (Properties, error) {
 			size += info.Size()
 			if size > maxPropertyBytes {
 				incomplete = true
-				return fs.SkipAll
+				return errPropertyScanLimit
 			}
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errPropertyScanLimit) {
 		return Properties{}, operationError("io_error")
 	}
+	if size > maxPropertyBytes {
+		size = maxPropertyBytes
+	}
 	properties.Size = size
+	if count > maxPropertyEntries {
+		count = maxPropertyEntries
+	}
 	properties.EntryCount = count
 	properties.Incomplete = incomplete
 	return properties, nil
