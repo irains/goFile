@@ -53,6 +53,26 @@ func TestRouterRequiresAuthentication(t *testing.T) {
 	if got := response.Header().Get("Cache-Control"); got != "no-store, private" { t.Fatalf("directory cache-control = %q", got) }
 }
 
+func TestBatchDownloadRouteDoesNotConflictWithFileDownloads(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousTemplates := conf.GoFile, reader, uploader, templateSets
+	conf.GoFile, reader, uploader = t.TempDir(), false, false
+	t.Cleanup(func() { conf.GoFile, reader, uploader, templateSets = previousRoot, previousReader, previousUploader, previousTemplates })
+	router := newRouter(testManager(t))
+	request := httptest.NewRequest(http.MethodGet, "/batch-download/not-a-ticket", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusFound {
+		t.Fatalf("unauthenticated batch download = %d", response.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/download/missing.txt", nil)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusFound {
+		t.Fatalf("unauthenticated file download = %d", response.Code)
+	}
+}
+
 func TestAPIUploadAllowsBearerOnly(t *testing.T) {
 	previousRoot, previousReader, previousUploader, previousTemplates := conf.GoFile, reader, uploader, templateSets
 	conf.GoFile, reader, uploader = t.TempDir(), false, false

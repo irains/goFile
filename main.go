@@ -393,6 +393,40 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		logAction(c, "查看", rel)
 		c.File(absolute)
 	})
+	protected.GET("/batch-download/:ticket", func(c *gin.Context) {
+		session := authInfo(c)
+		if session.SessionID == "" {
+			hiddenNotFound(c)
+			return
+		}
+		items, ok := manager.ConsumeArchiveTicket(session.SessionID, c.Param("ticket"))
+		if !ok {
+			hiddenNotFound(c)
+			return
+		}
+		selection, err := utils.SelectionFromArchiveItems(items)
+		if err != nil {
+			errorCode := utils.ErrorCode(err)
+			if errorCode == "not_found" || errorCode == "unsupported_file_type" || errorCode == "invalid_path" {
+				hiddenNotFound(c)
+				return
+			}
+			c.Status(operationStatus(err))
+			return
+		}
+		archive, cleanup, err := utils.PrepareSelectionZip(selection)
+		if err != nil {
+			c.Status(operationStatus(err))
+			return
+		}
+		defer cleanup()
+		setPrivateResponse(c)
+		c.Header("Content-Type", "application/zip")
+		c.Header("Content-Disposition", "attachment; filename=goFile-selection.zip")
+		c.Header("X-Content-Type-Options", "nosniff")
+		_, _ = io.Copy(c.Writer, archive)
+	})
+
 	protected.GET("/download/*path", func(c *gin.Context) {
 		absolute, rel, _, err := fileForRead(c.Param("path"))
 		if err != nil {
@@ -431,39 +465,6 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "properties": properties})
-	})
-	protected.GET("/download/batch/:ticket", func(c *gin.Context) {
-		session := authInfo(c)
-		if session.SessionID == "" {
-			hiddenNotFound(c)
-			return
-		}
-		items, ok := manager.ConsumeArchiveTicket(session.SessionID, c.Param("ticket"))
-		if !ok {
-			hiddenNotFound(c)
-			return
-		}
-		selection, err := utils.SelectionFromArchiveItems(items)
-		if err != nil {
-			errorCode := utils.ErrorCode(err)
-			if errorCode == "not_found" || errorCode == "unsupported_file_type" || errorCode == "invalid_path" {
-				hiddenNotFound(c)
-				return
-			}
-			c.Status(operationStatus(err))
-			return
-		}
-		archive, cleanup, err := utils.PrepareSelectionZip(selection)
-		if err != nil {
-			c.Status(operationStatus(err))
-			return
-		}
-		defer cleanup()
-		setPrivateResponse(c)
-		c.Header("Content-Type", "application/zip")
-		c.Header("Content-Disposition", "attachment; filename=goFile-selection.zip")
-		c.Header("X-Content-Type-Options", "nosniff")
-		_, _ = io.Copy(c.Writer, archive)
 	})
 
 	// Upload APIs are available in normal mode and in -ru mode.
@@ -836,7 +837,7 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 			jsonError(c, http.StatusInternalServerError, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "download_url": "/download/batch/" + ticket})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "download_url": "/batch-download/" + ticket})
 	})
 	// Logout is intentionally present in all modes.
 	logout := protected.Group("/")
