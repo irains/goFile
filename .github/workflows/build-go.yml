@@ -2,33 +2,71 @@ name: Release Go
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and upload assets for
+        required: true
+        type: string
   release:
     types: [published]
 
-# Release assets are uploaded with the repository-scoped GITHUB_TOKEN. The
-# default token may be read-only, so explicitly grant the action write access.
 permissions:
   contents: write
 
 jobs:
   build-go-binary:
+    name: ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        goos: [linux, darwin,windows]
-        goarch: [amd64, arm64,"386"]
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64, "386"]
         exclude:
-          - goarch: arm64
-            goos: windows
-          - goarch: "386"
-            goos: darwin
+          - goos: windows
+            goarch: arm64
+          - goos: darwin
+            goarch: "386"
     steps:
       - uses: actions/checkout@v4
-      - uses: wangyoucao577/go-release-action@v1.36
+      - uses: actions/setup-go@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          goos: ${{ matrix.goos }}
-          goarch: ${{ matrix.goarch }}
-          goversion: go.mod
-          binary_name: goFile
-          asset_name: goFile-${{ matrix.goos }}-${{ matrix.goarch }}
+          go-version: "1.19.13"
+          cache: true
+      - name: Build release archive
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          asset_name="goFile-${GOOS}-${GOARCH}"
+          mkdir -p dist
+
+          if [ "$GOOS" = "windows" ]; then
+            binary="goFile.exe"
+          else
+            binary="goFile"
+          fi
+
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "dist/${binary}" .
+
+          if [ "$GOOS" = "windows" ]; then
+            archive="${asset_name}.zip"
+            (
+              cd dist
+              zip -q "${archive}" "${binary}"
+            )
+          else
+            archive="${asset_name}.tar.gz"
+            tar -C dist -czf "dist/${archive}" "${binary}"
+          fi
+
+          rm "dist/${binary}"
+          sha256sum "dist/${archive}" > "dist/${archive}.sha256"
+      - name: Upload release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$RELEASE_TAG" dist/* --clobber
