@@ -89,6 +89,7 @@ func TestLoginRejectsUnsafeNextAndPreviewIsPlainText(t *testing.T) {
 	conf.GoFile, reader, uploader = t.TempDir(), false, false
 	t.Cleanup(func() { conf.GoFile, reader, uploader, templateSets = previousRoot, previousReader, previousUploader, previousTemplates })
 	if err := os.WriteFile(conf.GoFile+string(os.PathSeparator)+"payload.html", []byte("<script>alert(1)</script>"), 0644); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(conf.GoFile+string(os.PathSeparator)+"notes.txt", []byte("safe text"), 0644); err != nil { t.Fatal(err) }
 	router := newRouter(testManager(t))
 	body := url.Values{"username": []string{"admin"}, "password": []string{"a durable password"}, "next": []string{"/\\\\evil.example"}}.Encode()
 	request := httptest.NewRequest(http.MethodPost, "/login", bytes.NewBufferString(body))
@@ -101,8 +102,12 @@ func TestLoginRejectsUnsafeNextAndPreviewIsPlainText(t *testing.T) {
 	if got := response.Header().Get("Content-Disposition"); got == "" { t.Fatal("active content preview must download") }
 	if got := response.Header().Get("Content-Type"); got == "text/html; charset=utf-8" { t.Fatalf("active content type = %q", got) }
 	if got := response.Header().Get("X-Content-Type-Options"); got != "nosniff" { t.Fatalf("nosniff = %q", got) }
-	if got := response.Header().Get("Content-Security-Policy"); got == "" { t.Fatal("preview must set a restrictive CSP") }
+	if got := response.Header().Get("Content-Security-Policy"); got != "default-src 'none'; base-uri 'none'; form-action 'none'; sandbox" { t.Fatalf("active content CSP = %q", got) }
 	if got := response.Header().Get("Cache-Control"); got != "no-store, private" { t.Fatalf("cache-control = %q", got) }
+
+	request = httptest.NewRequest(http.MethodGet, "/view/notes.txt", nil); request.AddCookie(cookie)
+	response = httptest.NewRecorder(); router.ServeHTTP(response, request)
+	if got := response.Header().Get("Content-Security-Policy"); got != "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; sandbox" { t.Fatalf("text preview CSP = %q", got) }
 
 	request = httptest.NewRequest(http.MethodGet, "/view/missing.txt", nil); request.AddCookie(cookie)
 	response = httptest.NewRecorder(); router.ServeHTTP(response, request)

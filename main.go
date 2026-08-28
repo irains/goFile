@@ -382,9 +382,10 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 			return
 		}
 		setPrivateResponse(c)
+		c.Header("Content-Security-Policy", "default-src 'none'; base-uri 'none'; form-action 'none'; sandbox")
+		c.Header("X-Content-Type-Options", "nosniff")
 		if !isInlinePreviewable(rel) {
 			c.Header("Content-Type", "application/octet-stream")
-			c.Header("X-Content-Type-Options", "nosniff")
 			logAction(c, "查看", rel)
 			c.FileAttachment(absolute, filepath.Base(rel))
 			return
