@@ -224,16 +224,16 @@ chmod 0600 gofile.env
 nano gofile.env
 ```
 
-填入四个必要值。bcrypt hash 中的 `$` 必须保持完整：
+填入四个必要值。为避免 Compose 插值 bcrypt hash 中的 `$`，用单引号包围该值：
 
 ```ini
 GOFILE_ADMIN_USERNAME=admin
-GOFILE_ADMIN_PASSWORD_HASH=$2a$10$replace-with-the-complete-bcrypt-hash
+GOFILE_ADMIN_PASSWORD_HASH='$2a$10$replace-with-the-complete-bcrypt-hash'
 GOFILE_SESSION_SECRET=replace-with-a-random-secret-at-least-32-characters
 GOFILE_API_TOKEN=replace-with-a-separate-random-token-at-least-32-characters
 ```
 
-当前 `compose.yaml` 使用标准 Compose `env_file` 语法。服务级 `env_file` 的值会原样传递给容器，因此 bcrypt hash 中的 `$` 应直接保存，**不要加单引号或双引号**。不要在 `compose.yaml` 中直接写入秘密。不要使用 `docker compose config` 的输出、`docker inspect` 输出或 shell 历史共享真实凭据。Docker daemon/API/socket 的管理权限可读取容器环境变量，应当像 root 权限一样保护。
+当前 `compose.yaml` 使用标准 Compose `env_file` 语法。Compose 会移除单引号，并把其中的 `$` 作为字面量传给容器。不要在 `compose.yaml` 中直接写入秘密。不要使用 `docker compose config` 的输出、`docker inspect` 输出或 shell 历史共享真实凭据。Docker daemon/API/socket 的管理权限可读取容器环境变量，应当像 root 权限一样保护。
 
 ### 2. 构建、检查并启动
 
