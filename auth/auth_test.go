@@ -50,6 +50,7 @@ func TestGeneratePasswordHash(t *testing.T) {
 	for _, password := range [][]byte{nil, []byte(strings.Repeat("x", maxPasswordBytes+1))} {
 		if _, err := GeneratePasswordHash(password); !errors.Is(err, ErrInvalidPassword) && !errors.Is(err, ErrPasswordTooLong) {
 			t.Fatalf("invalid password error = %v", err)
+		}
 	}
 }
 
