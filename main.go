@@ -335,6 +335,7 @@ func renderDirectory(c *gin.Context, manager *auth.Manager, rawPath string) {
 		"path":         pagePath,
 		"rawPath":      cleanPath,
 		"prev":         appPath(utils.GetPrevPath(cleanPath)),
+		"hasParent":    cleanPath != "",
 		"listingToken": listingToken,
 	})
 }
@@ -527,6 +528,24 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		}
 		logAction(c, "编辑", rel)
 		renderHTML(c, "editor.tmpl", gin.H{"data": string(data), "path": rel})
+	})
+	protected.GET("/api/directories", func(c *gin.Context) {
+		setPrivateResponse(c)
+		cleanPath, err := utils.CleanRelative(c.Query("path"), true)
+		if err != nil {
+			jsonError(c, operationStatus(err), err)
+			return
+		}
+		info, err := utils.ListDirectory(cleanPath)
+		if err != nil {
+			jsonError(c, operationStatus(err), err)
+			return
+		}
+		directories := info.Dirs
+		if directories == nil {
+			directories = []conf.Dir{}
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "path": cleanPath, "dirs": directories})
 	})
 	protected.GET("/api/properties", func(c *gin.Context) {
 		if authInfo(c).Bearer {

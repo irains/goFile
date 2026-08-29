@@ -30,8 +30,8 @@ type File struct {
 }
 
 type Dir struct {
-	DirName string
-	DirPath string
+	DirName string `json:"name"`
+	DirPath string `json:"path"`
 }
 
 var (

@@ -37,7 +37,8 @@
         <p class="workspace-meta">{{.rawPath}}{{if not .rawPath}}/{{end}} · {{len .info.Entries}} {{t "selected"}}</p>
       </div>
       <div class="d-flex flex-wrap gap-2">
-        {{if .prev}}<a class="btn btn-outline-secondary" href="{{.prev}}">← {{t "back"}}</a>{{end}}
+        <button class="btn btn-outline-secondary" type="button" id="refreshButton">↻ {{t "refresh"}}</button>
+        {{if .hasParent}}<a class="btn btn-outline-secondary" href="{{.prev}}">← {{t "back"}}</a>{{end}}
         {{if not .reader}}
         <button class="btn btn-outline-secondary" type="button" data-action="new-file">+ {{t "nFile"}}</button>
         <button class="btn btn-primary" type="button" data-action="new-folder">+ {{t "nDir"}}</button>
@@ -45,54 +46,64 @@
       </div>
     </div>
 
-    {{if .info.Entries}}
+    {{if or .info.Entries .hasParent}}
     <div class="table-wrap">
       <table class="table table-hover align-middle" id="fileTable">
-          <thead>
-            <tr>
-              <th scope="col" style="width:3rem"><input class="form-check-input" type="checkbox" id="selectAll" aria-label="{{t "selectAll"}}"></th>
-              <th scope="col">{{t "name"}}</th>
-              <th scope="col" class="col-type">{{t "kind"}}</th>
-              <th scope="col" class="col-size">{{t "size"}}</th>
-              <th scope="col" class="col-modified">{{t "modified"}}</th>
-              <th scope="col" class="text-end" style="width:3.5rem"><span class="visually-hidden">{{t "actions"}}</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .info.Entries}}
-            <tr data-name="{{.Name}}" data-path="{{.Path}}" data-version="{{.Version}}" data-kind="{{.Kind}}">
-              <td><input class="form-check-input entry-check" type="checkbox" aria-label="{{t "selectItem"}} {{.Name}}"></td>
-              <td>
-                <div class="d-flex align-items-center gap-2 min-w-0">
-                  <span class="item-icon {{if eq .Kind "directory"}}folder{{end}}" aria-hidden="true">{{if eq .Kind "directory"}}▸{{else}}·{{end}}</span>
-                  {{if eq .Kind "directory"}}<a class="item-name" href="{{appPath (printf "/d/%s" .Path)}}">{{.Name}}</a>{{else}}<a class="item-name" href="{{appPath (printf "/download/%s" .Path)}}">{{.Name}}</a>{{end}}
-                </div>
-                <div class="item-meta-mobile">{{if eq .Kind "directory"}}{{t "folder"}}{{else}}{{if .Extension}}{{.Extension}}{{else}}{{t "file"}}{{end}}{{end}} · <span data-size="{{.Size}}"></span> · <time datetime="{{.Modified.Format "2006-01-02T15:04:05Z07:00"}}" data-time="{{.Modified.Unix}}"></time></div>
-              </td>
-              <td class="col-type"><span class="kind-badge">{{if eq .Kind "directory"}}{{t "folder"}}{{else}}{{if .Extension}}{{.Extension}}{{else}}{{t "file"}}{{end}}{{end}}</span></td>
-              <td class="col-size text-secondary"><span data-size="{{.Size}}">{{.Size}}</span></td>
-              <td class="col-modified text-secondary"><time datetime="{{.Modified.Format "2006-01-02T15:04:05Z07:00"}}" data-time="{{.Modified.Unix}}">{{.Modified.Format "2006-01-02 15:04"}}</time></td>
-              <td class="text-end">
-                <div class="dropdown">
-                  <button class="btn btn-sm btn-icon btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="{{t "more"}} {{.Name}}">⋯</button>
-                  <ul class="dropdown-menu dropdown-menu-end">
-                    {{if eq .Kind "directory"}}<li><a class="dropdown-item" href="{{appPath (printf "/d/%s" .Path)}}">↗ {{t "folder"}}</a></li>{{else}}<li><a class="dropdown-item" href="{{appPath (printf "/download/%s" .Path)}}">↓ {{t "download"}}</a></li>{{if previewable .Path}}<li><a class="dropdown-item" target="_blank" href="{{appPath (printf "/view/%s" .Path)}}">◌ {{t "view"}}</a></li>{{end}}{{if not $.reader}}<li><a class="dropdown-item" target="_blank" href="{{appPath (printf "/edit/%s" .Path)}}">⌘ {{t "edit"}}</a></li>{{end}}{{end}}
-                    <li><button class="dropdown-item" type="button" data-action="properties">ⓘ {{t "properties"}}</button></li>
-                    {{if not $.reader}}
-                    <li><hr class="dropdown-divider"></li>
-                    <li><button class="dropdown-item" type="button" data-action="rename">↻ {{t "rename"}}</button></li>
-                    <li><button class="dropdown-item" type="button" data-action="move">→ {{t "move"}}</button></li>
-                    <li><button class="dropdown-item" type="button" data-action="copy">⧉ {{t "copy"}}</button></li>
-                    {{if eq .Kind "directory"}}<li><button class="dropdown-item" type="button" data-action="zip">⌑ {{t "zip"}}</button></li>{{else}}{{if .IsArchive}}<li><button class="dropdown-item" type="button" data-action="unzip">⌑ {{t "unzip"}}</button></li>{{end}}<li><button class="dropdown-item" type="button" data-action="md5"># {{t "md5"}}</button></li>{{end}}
-                    <li><hr class="dropdown-divider"></li>
-                    <li><button class="dropdown-item danger" type="button" data-action="delete">× {{t "del"}}</button></li>
-                    {{end}}
-                  </ul>
-                </div>
-              </td>
-            </tr>
-            {{end}}
-          </tbody>
+        <thead>
+          <tr>
+            <th scope="col" style="width:3rem"><input class="form-check-input" type="checkbox" id="selectAll" aria-label="{{t "selectAll"}}"></th>
+            <th scope="col">{{t "name"}}</th>
+            <th scope="col" class="col-type">{{t "kind"}}</th>
+            <th scope="col" class="col-size">{{t "size"}}</th>
+            <th scope="col" class="col-modified">{{t "modified"}}</th>
+            <th scope="col" class="text-end" style="width:3.5rem"><span class="visually-hidden">{{t "actions"}}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{if .hasParent}}
+          <tr class="parent-row">
+            <td></td>
+            <td><a class="parent-link" href="{{.prev}}"><span aria-hidden="true">↖</span>..</a></td>
+            <td class="col-type"><span class="kind-badge">{{t "upOneLevel"}}</span></td>
+            <td class="col-size"></td>
+            <td class="col-modified"></td>
+            <td></td>
+          </tr>
+          {{end}}
+          {{range .info.Entries}}
+          <tr data-entry="true" data-name="{{.Name}}" data-path="{{.Path}}" data-version="{{.Version}}" data-kind="{{.Kind}}">
+            <td><input class="form-check-input entry-check" type="checkbox" aria-label="{{t "selectItem"}} {{.Name}}"></td>
+            <td>
+              <div class="d-flex align-items-center gap-2 min-w-0">
+                <span class="item-icon {{if eq .Kind "directory"}}folder{{end}}" aria-hidden="true">{{if eq .Kind "directory"}}▸{{else}}·{{end}}</span>
+                {{if eq .Kind "directory"}}<a class="item-name" href="{{appPath (printf "/d/%s" .Path)}}">{{.Name}}</a>{{else}}<a class="item-name" href="{{appPath (printf "/download/%s" .Path)}}">{{.Name}}</a>{{end}}
+              </div>
+              <div class="item-meta-mobile">{{if eq .Kind "directory"}}{{t "folder"}}{{else}}{{if .Extension}}{{.Extension}}{{else}}{{t "file"}}{{end}}{{end}} · <span data-size="{{.Size}}"></span> · <time datetime="{{.Modified.Format "2006-01-02T15:04:05Z07:00"}}" data-time="{{.Modified.Unix}}"></time></div>
+            </td>
+            <td class="col-type"><span class="kind-badge">{{if eq .Kind "directory"}}{{t "folder"}}{{else}}{{if .Extension}}{{.Extension}}{{else}}{{t "file"}}{{end}}{{end}}</span></td>
+            <td class="col-size text-secondary"><span data-size="{{.Size}}">{{.Size}}</span></td>
+            <td class="col-modified text-secondary"><time datetime="{{.Modified.Format "2006-01-02T15:04:05Z07:00"}}" data-time="{{.Modified.Unix}}">{{.Modified.Format "2006-01-02 15:04"}}</time></td>
+            <td class="text-end">
+              <div class="dropdown">
+                <button class="btn btn-sm btn-icon btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="{{t "more"}} {{.Name}}">⋯</button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  {{if eq .Kind "directory"}}<li><a class="dropdown-item" href="{{appPath (printf "/d/%s" .Path)}}">↗ {{t "folder"}}</a></li>{{else}}<li><a class="dropdown-item" href="{{appPath (printf "/download/%s" .Path)}}">↓ {{t "download"}}</a></li>{{if previewable .Path}}<li><a class="dropdown-item" target="_blank" href="{{appPath (printf "/view/%s" .Path)}}">◌ {{t "view"}}</a></li>{{end}}{{if not $.reader}}<li><a class="dropdown-item" target="_blank" href="{{appPath (printf "/edit/%s" .Path)}}">⌘ {{t "edit"}}</a></li>{{end}}{{end}}
+                  <li><button class="dropdown-item" type="button" data-action="properties">ⓘ {{t "properties"}}</button></li>
+                  {{if not $.reader}}
+                  <li><hr class="dropdown-divider"></li>
+                  <li><button class="dropdown-item" type="button" data-action="rename">↻ {{t "rename"}}</button></li>
+                  <li><button class="dropdown-item" type="button" data-action="move">→ {{t "move"}}</button></li>
+                  <li><button class="dropdown-item" type="button" data-action="copy">⧉ {{t "copy"}}</button></li>
+                  {{if eq .Kind "directory"}}<li><button class="dropdown-item" type="button" data-action="zip">⌑ {{t "zip"}}</button></li>{{else}}{{if .IsArchive}}<li><button class="dropdown-item" type="button" data-action="unzip">⌑ {{t "unzip"}}</button></li>{{end}}<li><button class="dropdown-item" type="button" data-action="md5"># {{t "md5"}}</button></li>{{end}}
+                  <li><hr class="dropdown-divider"></li>
+                  <li><button class="dropdown-item danger" type="button" data-action="delete">× {{t "del"}}</button></li>
+                  {{end}}
+                </ul>
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
       </table>
     </div>
     {{else}}
@@ -122,8 +133,21 @@
   <div class="offcanvas-header"><h2 class="offcanvas-title h5" id="actionPanelTitle"></h2><button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="{{t "cancel"}}"></button></div>
   <div class="offcanvas-body">
     <p class="text-secondary" id="actionPanelSummary"></p>
+    <div id="actionPanelError" class="alert alert-danger d-none" role="alert" tabindex="-1"></div>
     <div class="mb-3 d-none" id="nameFieldWrap"><label class="form-label" for="actionName">{{t "newName"}}</label><input class="form-control" id="actionName" autocomplete="off"></div>
-    <div class="mb-3 d-none" id="destinationFieldWrap"><label class="form-label" for="actionDestination">{{t "destination"}}</label><input class="form-control" id="actionDestination" placeholder="logs/archive" autocomplete="off"><div class="form-text text-secondary">{{t "keepName"}}</div></div>
+    <div class="mb-3 d-none" id="destinationFieldWrap">
+      <label class="form-label">{{t "destination"}}</label>
+      <div class="folder-picker" id="folderPicker">
+        <div class="folder-picker-toolbar">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="pickerUp" data-picker-control aria-label="{{t "upOneLevel"}}">←</button>
+          <span class="folder-picker-path" id="pickerPath"></span>
+          <button type="button" class="btn btn-sm btn-primary" id="pickerUse" data-picker-control>{{t "useThisFolder"}}</button>
+        </div>
+        <div class="folder-list" id="folderList"></div>
+      </div>
+      <div class="destination-summary mt-2" id="selectedDestination"></div>
+      <div class="form-text text-secondary">{{t "keepName"}}</div>
+    </div>
     <div id="propertiesContent" class="small"></div>
     <div class="d-flex justify-content-end gap-2 mt-4" id="actionPanelButtons"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="offcanvas">{{t "cancel"}}</button><button type="button" class="btn btn-primary" id="actionSubmit">{{t "confirm"}}</button></div>
   </div>
@@ -141,12 +165,14 @@
 (function () {
   const labels = {{js (t "operationFailed")}};
   const strings = {
-    selected: {{js (t "selected")}}, working: {{js (t "working")}}, properties: {{js (t "properties")}},
+    selected: {{js (t "selected")}}, working: {{js (t "working")}}, confirm: {{js (t "confirm")}}, properties: {{js (t "properties")}},
     rename: {{js (t "rename")}}, move: {{js (t "move")}}, copy: {{js (t "copy")}},
     newFile: {{js (t "nFile")}}, newFolder: {{js (t "nDir")}}, zip: {{js (t "zip")}}, unzip: {{js (t "unzip")}}, md5: {{js (t "md5")}},
     propertiesLoading: {{js (t "propertiesLoading")}}, operationFailed: labels,
     deleteTitle: {{js (t "deleteTitle")}}, deleteItems: {{js (t "deleteItems")}}, incomplete: {{js (t "incomplete")}},
-    invalid_path: {{js (t "invalid_path")}}, invalid_name: {{js (t "invalid_name")}}, not_found: {{js (t "not_found")}}, destination_exists: {{js (t "destination_exists")}}, source_changed: {{js (t "source_changed")}}, self_descendant: {{js (t "self_descendant")}}, cross_device_move: {{js (t "cross_device_move")}}, batch_limit_exceeded: {{js (t "batch_limit_exceeded")}}, archive_limit_exceeded: {{js (t "archive_limit_exceeded")}}, root_operation_forbidden: {{js (t "root_operation_forbidden")}}, io_error: {{js (t "io_error")}}, execution_partial: {{js (t "execution_partial")}}, delete_partial: {{js (t "delete_partial")}}
+    workspaceRoot: {{js (t "workspaceRoot")}}, useThisFolder: {{js (t "useThisFolder")}}, selectedDestination: {{js (t "selectedDestination")}},
+    destinationRequired: {{js (t "destinationRequired")}}, loadingFolders: {{js (t "loadingFolders")}}, noSubfolders: {{js (t "noSubfolders")}},
+    invalid_path: {{js (t "invalid_path")}}, invalid_name: {{js (t "invalid_name")}}, not_found: {{js (t "not_found")}}, not_directory: {{js (t "not_directory")}}, destination_exists: {{js (t "destination_exists")}}, destination_same_directory: {{js (t "destination_same_directory")}}, source_changed: {{js (t "source_changed")}}, self_descendant: {{js (t "self_descendant")}}, cross_device_move: {{js (t "cross_device_move")}}, batch_limit_exceeded: {{js (t "batch_limit_exceeded")}}, archive_limit_exceeded: {{js (t "archive_limit_exceeded")}}, root_operation_forbidden: {{js (t "root_operation_forbidden")}}, io_error: {{js (t "io_error")}}, execution_partial: {{js (t "execution_partial")}}, delete_partial: {{js (t "delete_partial")}}, csrf_invalid: {{js (t "csrf_invalid")}}, unauthenticated: {{js (t "unauthenticated")}}, browser_session_required: {{js (t "browser_session_required")}}
   };
   const rawPath = {{js .rawPath}};
   const appBase = {{js .basePath}};
@@ -165,7 +191,16 @@
   const toastInstance = new bootstrap.Toast(toast, {delay: 3600});
   const panelEl = document.getElementById('actionPanel');
   const panel = new bootstrap.Offcanvas(panelEl);
+  const panelError = document.getElementById('actionPanelError');
+  const panelSubmit = document.getElementById('actionSubmit');
+  const destinationWrap = document.getElementById('destinationFieldWrap');
+  const pickerPath = document.getElementById('pickerPath');
+  const pickerUp = document.getElementById('pickerUp');
+  const pickerUse = document.getElementById('pickerUse');
+  const folderList = document.getElementById('folderList');
+  const destinationSummary = document.getElementById('selectedDestination');
   const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+  const destinationPicker = {browsePath: '', selectedDestination: null, directories: [], loading: false, requestId: 0, submitting: false};
   let actionContext = null;
   let deleteContext = null;
 
@@ -176,37 +211,135 @@
   document.querySelectorAll('time[data-time]').forEach(el => el.textContent = formatTime(el.dataset.time));
 
   function setBusy(value) { main.setAttribute('aria-busy', value ? 'true' : 'false'); document.querySelectorAll('button, input').forEach(el => { if (el.closest('#logoutButton') || el.dataset.bsDismiss) return; el.disabled = value; }); }
-  function selectedRows() { return Array.from(table ? table.querySelectorAll('tbody tr') : []).filter(row => selected.has(row.dataset.name)); }
-  function updateSelection() { const rows = selectedRows(); const checks = table ? Array.from(table.querySelectorAll('.entry-check')) : []; checks.forEach(check => { check.checked = selected.has(check.closest('tr').dataset.name); }); if (selectAll) { selectAll.checked = checks.length > 0 && rows.length === checks.length; selectAll.indeterminate = rows.length > 0 && rows.length < checks.length; } if (bulkBar) bulkBar.classList.toggle('visible', rows.length > 0); if (bulkCount) bulkCount.textContent = rows.length + ' ' + strings.selected; }
+  function selectedRows() { return Array.from(table ? table.querySelectorAll('tbody tr[data-entry="true"]') : []).filter(row => selected.has(row.dataset.name)); }
+  function updateSelection() { const rows = selectedRows(); const checks = table ? Array.from(table.querySelectorAll('tbody tr[data-entry="true"] .entry-check')) : []; checks.forEach(check => { check.checked = selected.has(check.closest('tr').dataset.name); }); if (selectAll) { selectAll.checked = checks.length > 0 && rows.length === checks.length; selectAll.indeterminate = rows.length > 0 && rows.length < checks.length; } if (bulkBar) bulkBar.classList.toggle('visible', rows.length > 0); if (bulkCount) bulkCount.textContent = rows.length + ' ' + strings.selected; }
   function clearSelection() { selected.clear(); updateSelection(); }
   if (table) table.addEventListener('change', event => { if (!event.target.classList.contains('entry-check')) return; const name = event.target.closest('tr').dataset.name; event.target.checked ? selected.add(name) : selected.delete(name); updateSelection(); });
-  if (selectAll) selectAll.addEventListener('change', () => { table.querySelectorAll('tbody tr').forEach(row => selectAll.checked ? selected.add(row.dataset.name) : selected.delete(row.dataset.name)); updateSelection(); });
+  if (selectAll) selectAll.addEventListener('change', () => { table.querySelectorAll('tbody tr[data-entry="true"]').forEach(row => selectAll.checked ? selected.add(row.dataset.name) : selected.delete(row.dataset.name)); updateSelection(); });
   document.getElementById('clearSelection')?.addEventListener('click', clearSelection);
+  document.getElementById('refreshButton')?.addEventListener('click', () => location.reload());
 
   async function request(path, data, method = 'POST') { const options = {method, headers: {'X-CSRF-Token': csrf}}; if (data !== undefined) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(data); } const response = await fetch(appURL(path), options); let body = {}; try { body = await response.json(); } catch (_) {} if (!response.ok || !body.ok) { throw new Error(body.code || 'operationFailed'); } return body; }
   function formRequest(path, values) { const body = new URLSearchParams(values); return fetch(appURL(path), {method:'POST', headers:{'X-CSRF-Token': csrf, 'Content-Type':'application/x-www-form-urlencoded'}, body}).then(async response => { const data = await response.json().catch(() => ({})); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); return data; }); }
   function errorText(error) { return strings[error.message] || strings.operationFailed; }
   function entryFor(row) { return {name: row.dataset.name, path: row.dataset.path, version: row.dataset.version, kind: row.dataset.kind}; }
   function currentEntries() { return selectedRows().map(entryFor); }
+  function isMoveOrCopy() { return actionContext && (actionContext.type === 'move' || actionContext.type === 'copy'); }
+  function displayFolderPath(path) { return path ? '/' + path : strings.workspaceRoot; }
+  function parentFolderPath(path) { const separator = path.lastIndexOf('/'); return separator === -1 ? '' : path.slice(0, separator); }
+  function clearPanelError() { panelError.textContent = ''; panelError.classList.add('d-none'); }
+  function showPanelError(error) { panelError.textContent = typeof error === 'string' ? error : errorText(error); panelError.classList.remove('d-none'); panelError.focus(); }
+
+  function renderFolderPicker() {
+    pickerPath.textContent = displayFolderPath(destinationPicker.browsePath);
+    pickerUp.disabled = destinationPicker.submitting || destinationPicker.loading || destinationPicker.browsePath === '';
+    pickerUse.disabled = destinationPicker.submitting || destinationPicker.loading;
+    pickerUse.textContent = strings.useThisFolder;
+    folderList.replaceChildren();
+    if (destinationPicker.loading) {
+      const message = document.createElement('p'); message.className = 'small text-secondary mb-0'; message.textContent = strings.loadingFolders; folderList.append(message);
+    } else if (!destinationPicker.directories.length) {
+      const message = document.createElement('p'); message.className = 'small text-secondary mb-0'; message.textContent = strings.noSubfolders; folderList.append(message);
+    } else {
+      destinationPicker.directories.forEach(directory => {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-sm btn-outline-secondary'; button.dataset.pickerControl = 'true'; button.textContent = '▸ ' + directory.name; button.disabled = destinationPicker.submitting;
+        button.addEventListener('click', () => loadDirectories(directory.path));
+        folderList.append(button);
+      });
+    }
+    destinationSummary.textContent = destinationPicker.selectedDestination === null ? '' : strings.selectedDestination + ': ' + displayFolderPath(destinationPicker.selectedDestination);
+    if (isMoveOrCopy()) panelSubmit.disabled = destinationPicker.submitting || destinationPicker.selectedDestination === null;
+  }
+
+  async function loadDirectories(path) {
+    const requestId = ++destinationPicker.requestId;
+    destinationPicker.loading = true;
+    destinationPicker.browsePath = path;
+    clearPanelError();
+    renderFolderPicker();
+    try {
+      const response = await fetch(appURL('/api/directories?path=' + encodeURIComponent(path)));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed');
+      if (requestId !== destinationPicker.requestId) return;
+      destinationPicker.browsePath = data.path || '';
+      destinationPicker.directories = Array.isArray(data.dirs) ? data.dirs : [];
+    } catch (error) {
+      if (requestId !== destinationPicker.requestId) return;
+      destinationPicker.directories = [];
+      showPanelError(error);
+    } finally {
+      if (requestId === destinationPicker.requestId) { destinationPicker.loading = false; renderFolderPicker(); }
+    }
+  }
+
+  function chooseCurrentFolder() {
+    destinationPicker.selectedDestination = destinationPicker.browsePath;
+    clearPanelError();
+    renderFolderPicker();
+  }
+
+  function setPanelBusy(value) {
+    destinationPicker.submitting = value;
+    panelEl.setAttribute('aria-busy', value ? 'true' : 'false');
+    panelEl.querySelectorAll('[data-bs-dismiss], [data-picker-control]').forEach(control => { control.disabled = value; });
+    panelEl.querySelector('.btn-close').disabled = value;
+    document.getElementById('actionName').disabled = value;
+    panelSubmit.disabled = value || (isMoveOrCopy() && destinationPicker.selectedDestination === null);
+    panelSubmit.replaceChildren();
+    if (value) { const spinner = document.createElement('span'); spinner.className = 'spinner-border spinner-border-sm me-2'; spinner.setAttribute('aria-hidden', 'true'); panelSubmit.append(spinner, document.createTextNode(strings.working)); }
+    else panelSubmit.textContent = strings.confirm;
+    if (isMoveOrCopy()) renderFolderPicker();
+  }
+
+  pickerUp.addEventListener('click', () => loadDirectories(parentFolderPath(destinationPicker.browsePath)));
+  pickerUse.addEventListener('click', chooseCurrentFolder);
 
   function openPanel(type, row, batch) {
     actionContext = {type, row, batch};
-    const nameWrap = document.getElementById('nameFieldWrap'); const destinationWrap = document.getElementById('destinationFieldWrap'); const content = document.getElementById('propertiesContent'); const buttons = document.getElementById('actionPanelButtons');
-    content.replaceChildren(); nameWrap.classList.add('d-none'); destinationWrap.classList.add('d-none'); buttons.classList.remove('d-none');
+    const nameWrap = document.getElementById('nameFieldWrap'); const content = document.getElementById('propertiesContent'); const buttons = document.getElementById('actionPanelButtons');
+    clearPanelError(); content.replaceChildren(); nameWrap.classList.add('d-none'); destinationWrap.classList.add('d-none'); buttons.classList.remove('d-none');
+    panelEl.querySelector('.btn-close').disabled = false;
+    document.getElementById('actionName').disabled = false;
+    destinationPicker.requestId++; destinationPicker.browsePath = ''; destinationPicker.selectedDestination = null; destinationPicker.directories = []; destinationPicker.loading = false; destinationPicker.submitting = false;
     const entries = batch ? currentEntries() : (row ? [entryFor(row)] : []);
     document.getElementById('actionPanelSummary').textContent = batch ? entries.slice(0, 3).map(item => item.name).join(', ') + (entries.length > 3 ? ' +' + (entries.length - 3) : '') : (row ? row.dataset.name : '');
     const titleMap = {rename: strings.rename, move: strings.move, copy: strings.copy, properties: strings.properties, 'new-file': strings.newFile, 'new-folder': strings.newFolder};
     document.getElementById('actionPanelTitle').textContent = titleMap[type] || type;
     if (type === 'rename' || type === 'new-file' || type === 'new-folder') { nameWrap.classList.remove('d-none'); document.getElementById('actionName').value = type === 'rename' ? row.dataset.name : ''; }
     if (type === 'move' || type === 'copy') destinationWrap.classList.remove('d-none');
-    if (type === 'properties') { buttons.classList.add('d-none'); content.textContent = strings.propertiesLoading; panel.show(); loadProperties(row.dataset.path, content); return; }
-    panel.show(); setTimeout(() => document.getElementById(type === 'move' || type === 'copy' ? 'actionDestination' : 'actionName').focus(), 200);
+    if (type === 'properties') { buttons.classList.add('d-none'); panel.show(); loadProperties(row.dataset.path, content); return; }
+    panelSubmit.disabled = type === 'move' || type === 'copy';
+    panel.show();
+    if (type === 'move' || type === 'copy') { renderFolderPicker(); loadDirectories(''); }
+    else setTimeout(() => document.getElementById('actionName').focus(), 200);
   }
+
   async function loadProperties(path, container) { try { const response = await fetch(appURL('/api/properties?path=' + encodeURIComponent(path)), {headers: {'X-CSRF-Token': csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code); const p = data.properties; const rows = [[{{js (t "name")}}, p.name], [{{js (t "kind")}}, p.kind], [{{js (t "size")}}, formatBytes(p.size)], [{{js (t "modified")}}, formatTime(p.modified)], [{{js (t "entryCount")}}, p.entry_count || '—'], ['Mode', p.mode], ['Path', p.path]]; container.replaceChildren(...rows.map(([label, value]) => { const div = document.createElement('div'); div.className = 'd-flex justify-content-between gap-3 border-bottom py-2'; const a = document.createElement('span'); a.className='text-secondary'; a.textContent=label; const b=document.createElement('span'); b.className='text-end text-break'; b.textContent=value; div.append(a,b); return div; })); if (p.incomplete) { const note=document.createElement('p'); note.className='text-warning mt-3 mb-0'; note.textContent=strings.incomplete; container.append(note); } } catch (error) { container.textContent = errorText(error); } }
 
-  document.getElementById('actionSubmit').addEventListener('click', async () => { if (!actionContext) return; const {type, row, batch} = actionContext; setBusy(true); try { if (type === 'new-file') await formRequest('/do/newfile', {path:rawPath, filename:document.getElementById('actionName').value}); else if (type === 'new-folder') await formRequest('/do/newdir', {path:rawPath, dirname:document.getElementById('actionName').value}); else if (type === 'rename') await formRequest('/do/rename', {path:row.dataset.path, name:document.getElementById('actionName').value}); else if (type === 'move' || type === 'copy') { const endpoint = batch ? '/do/batch/' + type : '/do/' + type; if (batch) await request(endpoint, {listing_token:listingToken, entries:currentEntries(), destination:document.getElementById('actionDestination').value}); else await formRequest(endpoint, {path:row.dataset.path, destination:document.getElementById('actionDestination').value}); } panel.hide(); location.reload(); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
+  panelSubmit.addEventListener('click', async () => {
+    if (!actionContext || destinationPicker.submitting) return;
+    const {type, row, batch} = actionContext;
+    if ((type === 'move' || type === 'copy') && destinationPicker.selectedDestination === null) { showPanelError(strings.destinationRequired); return; }
+    setPanelBusy(true);
+    try {
+      if (type === 'new-file') await formRequest('/do/newfile', {path:rawPath, filename:document.getElementById('actionName').value});
+      else if (type === 'new-folder') await formRequest('/do/newdir', {path:rawPath, dirname:document.getElementById('actionName').value});
+      else if (type === 'rename') await formRequest('/do/rename', {path:row.dataset.path, name:document.getElementById('actionName').value});
+      else if (type === 'move' || type === 'copy') {
+        const endpoint = batch ? '/do/batch/' + type : '/do/' + type;
+        if (batch) await request(endpoint, {listing_token:listingToken, entries:currentEntries(), destination:destinationPicker.selectedDestination});
+        else await formRequest(endpoint, {path:row.dataset.path, destination:destinationPicker.selectedDestination});
+      }
+      panel.hide();
+      location.reload();
+    } catch (error) {
+      setPanelBusy(false);
+      showPanelError(error);
+    }
+  });
 
-  document.addEventListener('click', async event => { const button = event.target.closest('[data-action]'); if (!button) return; const row = button.closest('tr'); const type = button.dataset.action; if (type === 'rename' || type === 'move' || type === 'copy' || type === 'properties' || type === 'new-file' || type === 'new-folder') { openPanel(type, row, false); return; } if (type === 'delete') { deleteContext = {batch:false, row}; document.getElementById('deleteSummary').textContent = row.dataset.name; deleteModal.show(); return; } setBusy(true); try { if (type === 'zip') { const data = await formRequest('/do/zip', {path:row.dataset.path}); window.location.assign(appURL('/download/' + encodeURIComponent(data.path))); } else if (type === 'unzip') { await formRequest('/do/unzip', {path:row.dataset.path}); location.reload(); } else if (type === 'md5') { const data = await formRequest('/do/md5', {path:row.dataset.path}); showNotice('MD5: ' + data.hash); } } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
+  document.addEventListener('click', async event => { const button = event.target.closest('[data-action]'); if (!button) return; const row = button.closest('tr[data-entry="true"]'); const type = button.dataset.action; if (type === 'rename' || type === 'move' || type === 'copy' || type === 'properties' || type === 'new-file' || type === 'new-folder') { openPanel(type, row, false); return; } if (type === 'delete') { deleteContext = {batch:false, row}; document.getElementById('deleteSummary').textContent = row.dataset.name; deleteModal.show(); return; } setBusy(true); try { if (type === 'zip') { const data = await formRequest('/do/zip', {path:row.dataset.path}); window.location.assign(appURL('/download/' + encodeURIComponent(data.path))); } else if (type === 'unzip') { await formRequest('/do/unzip', {path:row.dataset.path}); location.reload(); } else if (type === 'md5') { const data = await formRequest('/do/md5', {path:row.dataset.path}); showNotice('MD5: ' + data.hash); } } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
   document.querySelectorAll('[data-batch-action]').forEach(button => button.addEventListener('click', async () => { const type = button.dataset.batchAction; const entries = currentEntries(); if (!entries.length) return; if (type === 'move' || type === 'copy') { openPanel(type, null, true); return; } if (type === 'delete') { deleteContext = {batch:true, entries}; document.getElementById('deleteSummary').textContent = entries.slice(0,3).map(item => item.name).join(', ') + (entries.length > 3 ? ' +' + (entries.length-3) : ''); deleteModal.show(); return; } if (type === 'download') { setBusy(true); try { const data = await request('/do/batch/download-zip', {listing_token:listingToken, entries}); window.location.assign(data.download_url); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } } }));
   document.getElementById('confirmDelete').addEventListener('click', async () => { if (!deleteContext) return; setBusy(true); try { if (deleteContext.batch) await request('/do/batch/delete', {listing_token:listingToken, entries:deleteContext.entries}); else await formRequest('/do/rm', {path:deleteContext.row.dataset.path}); deleteModal.hide(); location.reload(); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
   document.getElementById('logoutButton').addEventListener('click', async () => { try { const response = await fetch(appURL('/logout'), {method:'POST', headers:{'X-CSRF-Token':csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); window.location.assign(appURL('/login')); } catch (error) { showNotice(errorText(error), true); } });
