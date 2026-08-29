@@ -23,3 +23,9 @@ jobs:
         run: go test ./...
       - name: Build
         run: go build ./...
+      - name: Build Docker image
+        if: runner.os == 'Linux'
+        run: docker build --tag gofile:ci .
+      - name: Smoke-test Docker image
+        if: runner.os == 'Linux'
+        run: docker run --rm gofile:ci -h

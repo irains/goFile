@@ -1,0 +1,25 @@
+services:
+  gofile:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gofile:local
+    env_file:
+      - ./gofile.env
+    ports:
+      - "127.0.0.1:8089:8089"
+    volumes:
+      - gofile-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+    restart: unless-stopped
+
+volumes:
+  gofile-data:

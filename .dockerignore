@@ -1,0 +1,33 @@
+# Source control and local agent metadata
+.git/
+.github/
+.claude/
+
+# Deployment credentials and certificates
+.env
+.env.*
+*.env
+!gofile.env.example
+gofile.env
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# Local binaries and build output
+goFile
+goFile.exe
+main
+bin/
+dist/
+coverage/
+*.coverprofile
+
+# Local test fixtures and temporary output
+test.go
+test.jpg
+tmp/
+temp/
+*.tmp

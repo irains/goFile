@@ -1,30 +1,29 @@
-# 第一阶段：使用 alpine 镜像作为构建环境
-FROM golang:1.19-alpine as builder
-WORKDIR /gofile
+FROM golang:1.19.13-alpine3.18 AS builder
+WORKDIR /src
 
-# 将依赖管理文件复制到容器中
-COPY go.mod .
-
-# 下载依赖
+COPY go.mod go.sum ./
 RUN go mod download
 
-# 将项目代码复制到容器中
 COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/goFile .
 
-# 构建项目
-RUN go build -ldflags "-s -w" -o goFile
+FROM alpine:3.18
+ARG GOFILE_UID=10001
+ARG GOFILE_GID=10001
 
-# 第二阶段：使用最小的 alpine 镜像作为运行环境
-FROM alpine:latest
-WORKDIR /app
+RUN addgroup -S -g "${GOFILE_GID}" gofile \
+    && adduser -S -D -H -u "${GOFILE_UID}" -G gofile gofile \
+    && mkdir -p /app /data \
+    && chown gofile:gofile /data
 
-# 复制构建好的可执行文件到容器中
-COPY --from=builder /gofile/goFile /app/
-# The templates are embedded in the binary via assets/templates, so no runtime
-# template directory is needed.
+COPY --from=builder /out/goFile /app/goFile
+RUN chmod 0555 /app/goFile
 
-# 暴露容器的 8089 端口
+# Templates are embedded in the binary. /data is the only persistent writable path.
+WORKDIR /data
+USER gofile:gofile
+VOLUME ["/data"]
 EXPOSE 8089
 
-# 设置容器启动时要执行的命令
-ENTRYPOINT [ "./goFile" ]
+ENTRYPOINT ["/app/goFile"]
+CMD ["-host", "0.0.0.0", "-port", "8089", "-path", "/data", "-cookie-secure"]
