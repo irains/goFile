@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"goFile/auth"
 	"io"
+	"strings"
+	"unicode"
 )
 
 // startupConfig contains all settings required before the server can start.
 type startupConfig struct {
 	Path             string
+	BasePath         string
 	Port             string
 	Host             string
 	ReadOnly         bool
@@ -17,6 +20,21 @@ type startupConfig struct {
 	CookieSecure     bool
 	AllowInsecureLAN bool
 	Auth             auth.Config
+}
+
+func normalizeBasePath(raw string) (string, error) {
+	if raw == "" || raw == "/" {
+		return "", nil
+	}
+	if !strings.HasPrefix(raw, "/") || strings.HasSuffix(raw, "/") || strings.Contains(raw, "//") || strings.ContainsAny(raw, "\\;?#%") || strings.IndexFunc(raw, func(r rune) bool { return r > unicode.MaxASCII || unicode.IsControl(r) }) >= 0 {
+		return "", fmt.Errorf("must be an absolute path without a trailing slash or ambiguous characters")
+	}
+	for _, segment := range strings.Split(strings.TrimPrefix(raw, "/"), "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("must not contain empty, dot, or traversal segments")
+		}
+	}
+	return raw, nil
 }
 
 // optionalStringFlag records whether a credential argument was explicitly
@@ -47,6 +65,7 @@ func parseStartupConfig(args []string, lookup func(string) string, errOut io.Wri
 
 	config := startupConfig{}
 	flags.StringVar(&config.Path, "path", "./", "managed directory")
+	flags.StringVar(&config.BasePath, "base-path", "", "public URL base path, for example /gofile")
 	flags.StringVar(&config.Port, "port", "8089", "web port")
 	flags.StringVar(&config.Host, "host", "127.0.0.1", "listen host")
 	flags.BoolVar(&config.ReadOnly, "r", false, "read-only mode")
@@ -66,6 +85,11 @@ func parseStartupConfig(args []string, lookup func(string) string, errOut io.Wri
 	if len(flags.Args()) != 0 {
 		return startupConfig{}, fmt.Errorf("unexpected positional arguments")
 	}
+	basePath, err := normalizeBasePath(config.BasePath)
+	if err != nil {
+		return startupConfig{}, fmt.Errorf("invalid -base-path: %w", err)
+	}
+	config.BasePath = basePath
 	legacyPasswordConfigured := lookup != nil && lookup("GOFILE_ADMIN_PASSWORD") != ""
 	if config.UploadReadOnly {
 		config.ReadOnly = true
@@ -75,6 +99,7 @@ func parseStartupConfig(args []string, lookup func(string) string, errOut io.Wri
 	}
 
 	config.Auth = auth.ConfigFromLookup(lookup, config.CookieSecure)
+	config.Auth.CookiePath = config.BasePath
 	if username.set {
 		config.Auth.Username = username.value
 	}

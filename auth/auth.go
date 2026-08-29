@@ -42,6 +42,7 @@ type Config struct {
 	SessionSecret string
 	APIToken      string
 	CookieSecure  bool
+	CookiePath    string
 }
 
 // ConfigFromLookup loads configuration without validating it. Callers that merge
@@ -139,9 +140,35 @@ type Info struct {
 	Bearer    bool
 }
 
+func validCookiePath(path string) bool {
+	if path == "/" {
+		return true
+	}
+	if !strings.HasPrefix(path, "/") || strings.HasSuffix(path, "/") || strings.Contains(path, "//") || strings.ContainsAny(path, "\\;?#%") {
+		return false
+	}
+	for _, r := range path {
+		if r > 0x7e || r < 0x20 {
+			return false
+		}
+	}
+	for _, segment := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 func NewManager(config Config) (*Manager, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
+	}
+	if config.CookiePath == "" {
+		config.CookiePath = "/"
+	}
+	if !validCookiePath(config.CookiePath) {
+		return nil, ErrInvalidConfig
 	}
 	return &Manager{
 		config:          config,
@@ -272,20 +299,24 @@ func (m *Manager) Logout(info Info) {
 }
 
 func (m *Manager) Cookie(value string, expires time.Time) *http.Cookie {
+	return m.sessionCookie(value, expires, int(SessionDuration.Seconds()))
+}
+
+func (m *Manager) ExpiredCookie() *http.Cookie {
+	return m.sessionCookie("", time.Time{}, -1)
+}
+
+func (m *Manager) sessionCookie(value string, expires time.Time, maxAge int) *http.Cookie {
 	return &http.Cookie{
 		Name:     CookieName,
 		Value:    value,
-		Path:     "/",
+		Path:     m.config.CookiePath,
 		Expires:  expires,
-		MaxAge:   int(SessionDuration.Seconds()),
+		MaxAge:   maxAge,
 		HttpOnly: true,
 		Secure:   m.config.CookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	}
-}
-
-func ExpiredCookie() *http.Cookie {
-	return &http.Cookie{Name: CookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode}
 }
 
 // IssueListing creates a short-lived, session-bound permission envelope for the

@@ -88,6 +88,42 @@ func TestConfigRejectsInvalidPasswordHashes(t *testing.T) {
 	}
 }
 
+func TestNewManagerRejectsInvalidCookiePath(t *testing.T) {
+	for _, path := range []string{"relative", "/gofile/", "/gofile//files", "/gofile/../admin", "/gofile;admin", "/gofile?x=1", "/gofile/管理", "/gofile\x01admin"} {
+		config := testConfig(t)
+		config.CookiePath = path
+		if _, err := NewManager(config); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("CookiePath %q error = %v, want invalid configuration", path, err)
+		}
+	}
+}
+
+func TestSessionCookiesUseConfiguredPath(t *testing.T) {
+	config := testConfig(t)
+	config.CookiePath = "/gofile"
+	config.CookieSecure = true
+	manager, err := NewManager(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := manager.Cookie("signed", time.Now().Add(time.Hour))
+	if cookie.Path != "/gofile" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("session cookie = %#v", cookie)
+	}
+	expired := manager.ExpiredCookie()
+	if expired.Path != "/gofile" || expired.MaxAge != -1 || !expired.Secure || !expired.HttpOnly || expired.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("expired cookie = %#v", expired)
+	}
+
+	rootManager, err := NewManager(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootManager.Cookie("signed", time.Now()).Path != "/" || rootManager.ExpiredCookie().Path != "/" {
+		t.Fatal("empty cookie path should default to root")
+	}
+}
+
 func TestLoginSessionAndLogout(t *testing.T) {
 	manager, err := NewManager(testConfig(t))
 	if err != nil {

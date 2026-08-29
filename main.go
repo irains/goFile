@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,6 +31,7 @@ var (
 	uploader         bool
 	cookieSecure     bool
 	allowInsecureLAN bool
+	basePath         string
 	templateSets     map[i18n.LangType]*template.Template
 )
 
@@ -42,6 +44,7 @@ func initTemplates() {
 		templateSets[l] = template.Must(template.New("").Funcs(template.FuncMap{
 			"t":           func(key string) string { return i18n.Translate(key, l) },
 			"previewable": isInlinePreviewable,
+			"appPath":     appPath,
 			"js": func(value interface{}) template.JS {
 				encoded, err := json.Marshal(value)
 				if err != nil {
@@ -97,6 +100,7 @@ func renderHTML(c *gin.Context, name string, data gin.H) {
 	setPrivateResponse(c)
 	lang := getLang(c)
 	data["htmlLang"] = map[i18n.LangType]string{i18n.ZH: "zh-CN", i18n.EN: "en"}[lang]
+	data["basePath"] = basePath
 	data["allowUpload"] = !reader || uploader
 	data["reader"] = reader
 	info := authInfo(c)
@@ -140,16 +144,83 @@ func setPrivateResponse(c *gin.Context) {
 	c.Header("Vary", "Cookie")
 }
 
+func appPath(internalPath string) string {
+	if internalPath == "" || internalPath == "/" {
+		if basePath == "" {
+			return "/"
+		}
+		return basePath + "/"
+	}
+	return basePath + internalPath
+}
+
+func isSafeAppPath(path string) bool {
+	if path == "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.Contains(path, "\\") || strings.IndexFunc(path, unicode.IsControl) >= 0 {
+		return false
+	}
+	for _, segment := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
+		if segment == "." || segment == ".." || segment == "" && path != "/" {
+			return false
+		}
+	}
+	return true
+}
+
 func safeNextPath(raw string) string {
 	decoded, err := url.PathUnescape(raw)
-	if err != nil || decoded == "" || !strings.HasPrefix(decoded, "/") || strings.HasPrefix(decoded, "//") || strings.Contains(decoded, "\\") || strings.ContainsAny(decoded, "\r\n") {
-		return "/"
+	if err != nil || decoded == "" || !strings.HasPrefix(decoded, "/") || strings.HasPrefix(decoded, "//") || strings.Contains(decoded, "\\") || strings.IndexFunc(decoded, unicode.IsControl) >= 0 {
+		return appPath("/")
 	}
 	parsed, err := url.ParseRequestURI(decoded)
-	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Scheme != "" {
-		return "/"
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Scheme != "" || strings.HasPrefix(parsed.Path, "//") || strings.Contains(parsed.Path, "\\") {
+		return appPath("/")
 	}
-	return decoded
+	internalPath := parsed.Path
+	if basePath != "" {
+		switch {
+		case internalPath == basePath:
+			internalPath = "/"
+		case strings.HasPrefix(internalPath, basePath+"/"):
+			internalPath = strings.TrimPrefix(internalPath, basePath)
+		}
+	}
+	if !isSafeAppPath(internalPath) {
+		return appPath("/")
+	}
+	return appPath(internalPath) + func() string {
+		if parsed.RawQuery == "" {
+			return ""
+		}
+		return "?" + parsed.RawQuery
+	}()
+}
+
+func withBasePath(next http.Handler) http.Handler {
+	if basePath == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != basePath && !strings.HasPrefix(r.URL.Path, basePath+"/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		request := new(http.Request)
+		*request = *r
+		request.URL = new(url.URL)
+		*request.URL = *r.URL
+		request.URL.Path = strings.TrimPrefix(r.URL.Path, basePath)
+		if request.URL.Path == "" {
+			request.URL.Path = "/"
+		}
+		if r.URL.RawPath != "" {
+			request.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, basePath)
+			if request.URL.RawPath == "" {
+				request.URL.RawPath = "/"
+			}
+		}
+		request.RequestURI = request.URL.RequestURI()
+		next.ServeHTTP(w, request)
+	})
 }
 
 func hiddenNotFound(c *gin.Context) {
@@ -176,7 +247,7 @@ func authRequired(manager *auth.Manager) gin.HandlerFunc {
 		if wantsJSON(c) {
 			c.JSON(http.StatusUnauthorized, gin.H{"ok": false, "code": "unauthenticated"})
 		} else {
-			c.Redirect(http.StatusFound, "/login?next="+url.QueryEscape(safeNextPath(c.Request.URL.RequestURI())))
+			c.Redirect(http.StatusFound, appPath("/login")+"?next="+url.QueryEscape(safeNextPath(c.Request.URL.RequestURI())))
 		}
 		c.Abort()
 	}
@@ -263,7 +334,7 @@ func renderDirectory(c *gin.Context, manager *auth.Manager, rawPath string) {
 		"info":         info,
 		"path":         pagePath,
 		"rawPath":      cleanPath,
-		"prev":         utils.GetPrevPath(cleanPath),
+		"prev":         appPath(utils.GetPrevPath(cleanPath)),
 		"listingToken": listingToken,
 	})
 }
@@ -340,7 +411,7 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 	router.GET("/login", func(c *gin.Context) {
 		setPrivateResponse(c)
 		if _, ok := manager.SessionFromRequest(c.Request); ok {
-			c.Redirect(http.StatusFound, "/")
+			c.Redirect(http.StatusFound, appPath("/"))
 			return
 		}
 		renderHTML(c, "login.tmpl", gin.H{"next": safeNextPath(c.Query("next"))})
@@ -374,7 +445,7 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 	protected.GET("/d/*path", func(c *gin.Context) {
 		raw := pathFromParam(c.Param("path"))
 		if raw == "" {
-			c.Redirect(http.StatusMovedPermanently, "/")
+			c.Redirect(http.StatusMovedPermanently, appPath("/"))
 			return
 		}
 		renderDirectory(c, manager, raw)
@@ -842,14 +913,14 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 			jsonError(c, http.StatusInternalServerError, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"ok": true, "download_url": "/batch-download/" + ticket})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "download_url": appPath("/batch-download/" + ticket)})
 	})
 	// Logout is intentionally present in all modes.
 	logout := protected.Group("/")
 	logout.Use(csrfRequired(manager))
 	logout.POST("/logout", func(c *gin.Context) {
 		manager.Logout(authInfo(c))
-		http.SetCookie(c.Writer, auth.ExpiredCookie())
+		http.SetCookie(c.Writer, manager.ExpiredCookie())
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
@@ -860,14 +931,14 @@ func web(manager *auth.Manager) error {
 	address := net.JoinHostPort(conf.Host, conf.GoFilePort)
 	fmt.Println(strings.Repeat("-", 44))
 	fmt.Println("Directory : " + conf.GoFile)
-	fmt.Println("Listen    : http://" + address)
+	fmt.Println("Listen    : http://" + address + appPath("/"))
 	if !isLoopbackHost(conf.Host) {
 		for _, ip := range localIPs() {
-			fmt.Println("Access    : http://" + net.JoinHostPort(ip, conf.GoFilePort))
+			fmt.Println("Access    : http://" + net.JoinHostPort(ip, conf.GoFilePort) + appPath("/"))
 		}
 	}
 	fmt.Println(strings.Repeat("-", 44))
-	return newRouter(manager).Run(address)
+	return http.ListenAndServe(address, withBasePath(newRouter(manager)))
 }
 
 func isLoopbackHost(host string) bool {
@@ -891,6 +962,7 @@ func parseConfig() (*auth.Manager, error) {
 	uploader = startup.UploadReadOnly
 	cookieSecure = startup.CookieSecure
 	allowInsecureLAN = startup.AllowInsecureLAN
+	basePath = startup.BasePath
 	if _, err := utils.Root(); err != nil {
 		return nil, fmt.Errorf("invalid -path: %w", err)
 	}

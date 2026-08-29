@@ -130,6 +130,8 @@ body { overflow: hidden; background: var(--bg); }
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.16.0/ace.min.js" charset="utf-8"></script>
 <script>
     var csrf = {{js .csrf}};
+    var appBase = {{js .basePath}};
+    function appURL(path) { return appBase + path; }
     var editor = ace.edit("editor");
     editor.setTheme("ace/theme/tomorrow_night_bright");
     editor.setOptions({
@@ -191,7 +193,7 @@ body { overflow: hidden; background: var(--bg); }
 
     function save() {
         if (!confirm({{js (t "save")}} + "?")) return;
-        fetch("/do/save", {
+        fetch(appURL("/do/save"), {
             method: "POST",
             headers: {"Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf},
             body: "path=" + encodeURIComponent(curPath) + "&data=" + encodeURIComponent(editor.getValue())

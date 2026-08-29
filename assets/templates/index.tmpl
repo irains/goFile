@@ -5,7 +5,7 @@
 <a class="skip-link" href="#workspace">{{t "dls"}}</a>
 <div class="app-shell">
   <header class="app-header">
-    <a class="brand" href="/" aria-label="goFile {{t "dls"}}">
+    <a class="brand" href="{{appPath "/"}}" aria-label="goFile {{t "dls"}}">
       <span class="brand-mark">› goFile</span>
       <span class="brand-subtitle">{{t "appSubtitle"}}</span>
     </a>
@@ -18,7 +18,7 @@
 
   <nav aria-label="Breadcrumb">
     <ol class="breadcrumb">
-      <li class="breadcrumb-item"><a href="/">~</a></li>
+      <li class="breadcrumb-item"><a href="{{appPath "/"}}">~</a></li>
       {{if .rawPath}}<li class="breadcrumb-item active" aria-current="page">{{.rawPath}}</li>{{end}}
     </ol>
   </nav>
@@ -47,8 +47,7 @@
 
     {{if .info.Entries}}
     <div class="table-wrap">
-      <div class="table-responsive">
-        <table class="table table-hover align-middle" id="fileTable">
+      <table class="table table-hover align-middle" id="fileTable">
           <thead>
             <tr>
               <th scope="col" style="width:3rem"><input class="form-check-input" type="checkbox" id="selectAll" aria-label="{{t "selectAll"}}"></th>
@@ -66,7 +65,7 @@
               <td>
                 <div class="d-flex align-items-center gap-2 min-w-0">
                   <span class="item-icon {{if eq .Kind "directory"}}folder{{end}}" aria-hidden="true">{{if eq .Kind "directory"}}▸{{else}}·{{end}}</span>
-                  {{if eq .Kind "directory"}}<a class="item-name" href="/d/{{.Path}}">{{.Name}}</a>{{else}}<a class="item-name" href="/download/{{.Path}}">{{.Name}}</a>{{end}}
+                  {{if eq .Kind "directory"}}<a class="item-name" href="{{appPath (printf "/d/%s" .Path)}}">{{.Name}}</a>{{else}}<a class="item-name" href="{{appPath (printf "/download/%s" .Path)}}">{{.Name}}</a>{{end}}
                 </div>
                 <div class="item-meta-mobile">{{if eq .Kind "directory"}}{{t "folder"}}{{else}}{{if .Extension}}{{.Extension}}{{else}}{{t "file"}}{{end}}{{end}} · <span data-size="{{.Size}}"></span> · <time datetime="{{.Modified.Format "2006-01-02T15:04:05Z07:00"}}" data-time="{{.Modified.Unix}}"></time></div>
               </td>
@@ -77,7 +76,7 @@
                 <div class="dropdown">
                   <button class="btn btn-sm btn-icon btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="{{t "more"}} {{.Name}}">⋯</button>
                   <ul class="dropdown-menu dropdown-menu-end">
-                    {{if eq .Kind "directory"}}<li><a class="dropdown-item" href="/d/{{.Path}}">↗ {{t "folder"}}</a></li>{{else}}<li><a class="dropdown-item" href="/download/{{.Path}}">↓ {{t "download"}}</a></li>{{if previewable .Path}}<li><a class="dropdown-item" target="_blank" href="/view/{{.Path}}">◌ {{t "view"}}</a></li>{{end}}{{if not $.reader}}<li><a class="dropdown-item" target="_blank" href="/edit/{{.Path}}">⌘ {{t "edit"}}</a></li>{{end}}{{end}}
+                    {{if eq .Kind "directory"}}<li><a class="dropdown-item" href="{{appPath (printf "/d/%s" .Path)}}">↗ {{t "folder"}}</a></li>{{else}}<li><a class="dropdown-item" href="{{appPath (printf "/download/%s" .Path)}}">↓ {{t "download"}}</a></li>{{if previewable .Path}}<li><a class="dropdown-item" target="_blank" href="{{appPath (printf "/view/%s" .Path)}}">◌ {{t "view"}}</a></li>{{end}}{{if not $.reader}}<li><a class="dropdown-item" target="_blank" href="{{appPath (printf "/edit/%s" .Path)}}">⌘ {{t "edit"}}</a></li>{{end}}{{end}}
                     <li><button class="dropdown-item" type="button" data-action="properties">ⓘ {{t "properties"}}</button></li>
                     {{if not $.reader}}
                     <li><hr class="dropdown-divider"></li>
@@ -94,8 +93,7 @@
             </tr>
             {{end}}
           </tbody>
-        </table>
-      </div>
+      </table>
     </div>
     {{else}}
     <section class="empty-state" aria-label="{{t "empty"}}"><p class="mb-0">{{t "empty"}}</p></section>
@@ -115,10 +113,6 @@
       <h2 class="h6 mb-3" id="uploadHeading">{{t "upload"}}</h2>
       <div class="drop-zone" id="dropZone"><span>{{t "uploadHint"}}</span><input type="file" id="fileInput" aria-label="{{t "upload"}}"></div>
       <div class="progress mt-3 d-none" id="uploadProgress" role="progressbar" aria-label="{{t "uploading"}}"><div class="progress-bar" id="uploadProgressBar" style="width:0%"></div></div>
-      <div class="mt-4 small text-secondary">
-        <div class="fw-semibold text-body mb-2">{{t "api"}}</div>
-        <div class="d-flex gap-2 align-items-start"><code class="flex-grow-1 text-break" id="apiCommand"></code><button class="btn btn-sm btn-outline-secondary" type="button" id="copyApi">{{t "copyCommand"}}</button></div>
-      </div>
     </section>
     {{end}}
   </main>
@@ -155,6 +149,8 @@
     invalid_path: {{js (t "invalid_path")}}, invalid_name: {{js (t "invalid_name")}}, not_found: {{js (t "not_found")}}, destination_exists: {{js (t "destination_exists")}}, source_changed: {{js (t "source_changed")}}, self_descendant: {{js (t "self_descendant")}}, cross_device_move: {{js (t "cross_device_move")}}, batch_limit_exceeded: {{js (t "batch_limit_exceeded")}}, archive_limit_exceeded: {{js (t "archive_limit_exceeded")}}, root_operation_forbidden: {{js (t "root_operation_forbidden")}}, io_error: {{js (t "io_error")}}, execution_partial: {{js (t "execution_partial")}}, delete_partial: {{js (t "delete_partial")}}
   };
   const rawPath = {{js .rawPath}};
+  const appBase = {{js .basePath}};
+  const appURL = path => appBase + path;
   const listingToken = {{js .listingToken}};
   const csrf = document.querySelector('meta[name="csrf-token"]').content;
   const selected = new Set();
@@ -187,8 +183,8 @@
   if (selectAll) selectAll.addEventListener('change', () => { table.querySelectorAll('tbody tr').forEach(row => selectAll.checked ? selected.add(row.dataset.name) : selected.delete(row.dataset.name)); updateSelection(); });
   document.getElementById('clearSelection')?.addEventListener('click', clearSelection);
 
-  async function request(path, data, method = 'POST') { const options = {method, headers: {'X-CSRF-Token': csrf}}; if (data !== undefined) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(data); } const response = await fetch(path, options); let body = {}; try { body = await response.json(); } catch (_) {} if (!response.ok || !body.ok) { throw new Error(body.code || 'operationFailed'); } return body; }
-  function formRequest(path, values) { const body = new URLSearchParams(values); return fetch(path, {method:'POST', headers:{'X-CSRF-Token': csrf, 'Content-Type':'application/x-www-form-urlencoded'}, body}).then(async response => { const data = await response.json().catch(() => ({})); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); return data; }); }
+  async function request(path, data, method = 'POST') { const options = {method, headers: {'X-CSRF-Token': csrf}}; if (data !== undefined) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(data); } const response = await fetch(appURL(path), options); let body = {}; try { body = await response.json(); } catch (_) {} if (!response.ok || !body.ok) { throw new Error(body.code || 'operationFailed'); } return body; }
+  function formRequest(path, values) { const body = new URLSearchParams(values); return fetch(appURL(path), {method:'POST', headers:{'X-CSRF-Token': csrf, 'Content-Type':'application/x-www-form-urlencoded'}, body}).then(async response => { const data = await response.json().catch(() => ({})); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); return data; }); }
   function errorText(error) { return strings[error.message] || strings.operationFailed; }
   function entryFor(row) { return {name: row.dataset.name, path: row.dataset.path, version: row.dataset.version, kind: row.dataset.kind}; }
   function currentEntries() { return selectedRows().map(entryFor); }
@@ -206,20 +202,19 @@
     if (type === 'properties') { buttons.classList.add('d-none'); content.textContent = strings.propertiesLoading; panel.show(); loadProperties(row.dataset.path, content); return; }
     panel.show(); setTimeout(() => document.getElementById(type === 'move' || type === 'copy' ? 'actionDestination' : 'actionName').focus(), 200);
   }
-  async function loadProperties(path, container) { try { const response = await fetch('/api/properties?path=' + encodeURIComponent(path), {headers: {'X-CSRF-Token': csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code); const p = data.properties; const rows = [[{{js (t "name")}}, p.name], [{{js (t "kind")}}, p.kind], [{{js (t "size")}}, formatBytes(p.size)], [{{js (t "modified")}}, formatTime(p.modified)], [{{js (t "entryCount")}}, p.entry_count || '—'], ['Mode', p.mode], ['Path', p.path]]; container.replaceChildren(...rows.map(([label, value]) => { const div = document.createElement('div'); div.className = 'd-flex justify-content-between gap-3 border-bottom py-2'; const a = document.createElement('span'); a.className='text-secondary'; a.textContent=label; const b=document.createElement('span'); b.className='text-end text-break'; b.textContent=value; div.append(a,b); return div; })); if (p.incomplete) { const note=document.createElement('p'); note.className='text-warning mt-3 mb-0'; note.textContent=strings.incomplete; container.append(note); } } catch (error) { container.textContent = errorText(error); } }
+  async function loadProperties(path, container) { try { const response = await fetch(appURL('/api/properties?path=' + encodeURIComponent(path)), {headers: {'X-CSRF-Token': csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code); const p = data.properties; const rows = [[{{js (t "name")}}, p.name], [{{js (t "kind")}}, p.kind], [{{js (t "size")}}, formatBytes(p.size)], [{{js (t "modified")}}, formatTime(p.modified)], [{{js (t "entryCount")}}, p.entry_count || '—'], ['Mode', p.mode], ['Path', p.path]]; container.replaceChildren(...rows.map(([label, value]) => { const div = document.createElement('div'); div.className = 'd-flex justify-content-between gap-3 border-bottom py-2'; const a = document.createElement('span'); a.className='text-secondary'; a.textContent=label; const b=document.createElement('span'); b.className='text-end text-break'; b.textContent=value; div.append(a,b); return div; })); if (p.incomplete) { const note=document.createElement('p'); note.className='text-warning mt-3 mb-0'; note.textContent=strings.incomplete; container.append(note); } } catch (error) { container.textContent = errorText(error); } }
 
   document.getElementById('actionSubmit').addEventListener('click', async () => { if (!actionContext) return; const {type, row, batch} = actionContext; setBusy(true); try { if (type === 'new-file') await formRequest('/do/newfile', {path:rawPath, filename:document.getElementById('actionName').value}); else if (type === 'new-folder') await formRequest('/do/newdir', {path:rawPath, dirname:document.getElementById('actionName').value}); else if (type === 'rename') await formRequest('/do/rename', {path:row.dataset.path, name:document.getElementById('actionName').value}); else if (type === 'move' || type === 'copy') { const endpoint = batch ? '/do/batch/' + type : '/do/' + type; if (batch) await request(endpoint, {listing_token:listingToken, entries:currentEntries(), destination:document.getElementById('actionDestination').value}); else await formRequest(endpoint, {path:row.dataset.path, destination:document.getElementById('actionDestination').value}); } panel.hide(); location.reload(); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
 
-  document.addEventListener('click', async event => { const button = event.target.closest('[data-action]'); if (!button) return; const row = button.closest('tr'); const type = button.dataset.action; if (type === 'rename' || type === 'move' || type === 'copy' || type === 'properties' || type === 'new-file' || type === 'new-folder') { openPanel(type, row, false); return; } if (type === 'delete') { deleteContext = {batch:false, row}; document.getElementById('deleteSummary').textContent = row.dataset.name; deleteModal.show(); return; } setBusy(true); try { if (type === 'zip') { const data = await formRequest('/do/zip', {path:row.dataset.path}); window.location.assign('/download/' + encodeURIComponent(data.path)); } else if (type === 'unzip') { await formRequest('/do/unzip', {path:row.dataset.path}); location.reload(); } else if (type === 'md5') { const data = await formRequest('/do/md5', {path:row.dataset.path}); showNotice('MD5: ' + data.hash); } } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
+  document.addEventListener('click', async event => { const button = event.target.closest('[data-action]'); if (!button) return; const row = button.closest('tr'); const type = button.dataset.action; if (type === 'rename' || type === 'move' || type === 'copy' || type === 'properties' || type === 'new-file' || type === 'new-folder') { openPanel(type, row, false); return; } if (type === 'delete') { deleteContext = {batch:false, row}; document.getElementById('deleteSummary').textContent = row.dataset.name; deleteModal.show(); return; } setBusy(true); try { if (type === 'zip') { const data = await formRequest('/do/zip', {path:row.dataset.path}); window.location.assign(appURL('/download/' + encodeURIComponent(data.path))); } else if (type === 'unzip') { await formRequest('/do/unzip', {path:row.dataset.path}); location.reload(); } else if (type === 'md5') { const data = await formRequest('/do/md5', {path:row.dataset.path}); showNotice('MD5: ' + data.hash); } } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
   document.querySelectorAll('[data-batch-action]').forEach(button => button.addEventListener('click', async () => { const type = button.dataset.batchAction; const entries = currentEntries(); if (!entries.length) return; if (type === 'move' || type === 'copy') { openPanel(type, null, true); return; } if (type === 'delete') { deleteContext = {batch:true, entries}; document.getElementById('deleteSummary').textContent = entries.slice(0,3).map(item => item.name).join(', ') + (entries.length > 3 ? ' +' + (entries.length-3) : ''); deleteModal.show(); return; } if (type === 'download') { setBusy(true); try { const data = await request('/do/batch/download-zip', {listing_token:listingToken, entries}); window.location.assign(data.download_url); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } } }));
   document.getElementById('confirmDelete').addEventListener('click', async () => { if (!deleteContext) return; setBusy(true); try { if (deleteContext.batch) await request('/do/batch/delete', {listing_token:listingToken, entries:deleteContext.entries}); else await formRequest('/do/rm', {path:deleteContext.row.dataset.path}); deleteModal.hide(); location.reload(); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
-  document.getElementById('logoutButton').addEventListener('click', async () => { try { const response = await fetch('/logout', {method:'POST', headers:{'X-CSRF-Token':csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); window.location.assign('/login'); } catch (error) { showNotice(errorText(error), true); } });
+  document.getElementById('logoutButton').addEventListener('click', async () => { try { const response = await fetch(appURL('/logout'), {method:'POST', headers:{'X-CSRF-Token':csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); window.location.assign(appURL('/login')); } catch (error) { showNotice(errorText(error), true); } });
 
   const input = document.getElementById('fileInput'); const drop = document.getElementById('dropZone'); const progress = document.getElementById('uploadProgress'); const progressBar = document.getElementById('uploadProgressBar');
-  async function uploadFile(file) { if (!file) return; setBusy(true); progress?.classList.remove('d-none'); if (progressBar) progressBar.style.width = '12%'; try { const data = new FormData(); data.append('file', file); const response = await fetch('/do/upload/' + encodeURIComponent(rawPath), {method:'POST', headers:{'X-CSRF-Token':csrf}, body:data}); const result = await response.json(); if (!response.ok || !result.ok) throw new Error(result.code); if (progressBar) progressBar.style.width = '100%'; location.reload(); } catch (error) { showNotice(errorText(error), true); progress?.classList.add('d-none'); } finally { setBusy(false); } }
+  async function uploadFile(file) { if (!file) return; setBusy(true); progress?.classList.remove('d-none'); if (progressBar) progressBar.style.width = '12%'; try { const data = new FormData(); data.append('file', file); const response = await fetch(appURL('/do/upload/' + encodeURIComponent(rawPath)), {method:'POST', headers:{'X-CSRF-Token':csrf}, body:data}); const result = await response.json(); if (!response.ok || !result.ok) throw new Error(result.code); if (progressBar) progressBar.style.width = '100%'; location.reload(); } catch (error) { showNotice(errorText(error), true); progress?.classList.add('d-none'); } finally { setBusy(false); } }
   input?.addEventListener('change', () => uploadFile(input.files[0]));
   drop?.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('dragover'); }); drop?.addEventListener('dragleave', () => drop.classList.remove('dragover')); drop?.addEventListener('drop', event => { event.preventDefault(); drop.classList.remove('dragover'); uploadFile(event.dataTransfer.files[0]); });
-  const command = 'curl -H "Authorization: Bearer $GOFILE_API_TOKEN" -F "path=' + rawPath + '" -F "file=@/path/to/file" ' + window.location.origin + '/api/upload'; const commandEl=document.getElementById('apiCommand'); if (commandEl) commandEl.textContent=command; document.getElementById('copyApi')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(command); showNotice({{js (t "copied")}}); } catch (_) { showNotice(strings.operationFailed, true); } });
 })();
 </script>
 </body>

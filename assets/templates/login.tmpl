@@ -2,13 +2,13 @@
 <html lang="{{.htmlLang}}" data-bs-theme="dark">
 {{template "public/header" .}}
 <body>
-<main class="min-vh-100 d-grid place-items-center p-3">
+<main class="min-vh-100 d-flex align-items-center justify-content-center p-3">
   <section class="w-100" style="max-width: 25rem" aria-labelledby="loginTitle">
-    <a class="brand mb-5" href="/" aria-label="goFile"><span class="brand-mark">› goFile</span><span class="brand-subtitle">{{t "appSubtitle"}}</span></a>
+    <a class="brand mb-5" href="{{appPath "/"}}" aria-label="goFile"><span class="brand-mark">› goFile</span><span class="brand-subtitle">{{t "appSubtitle"}}</span></a>
     <h1 class="h3 mb-2" id="loginTitle">{{t "login"}}</h1>
     <p class="text-secondary mb-4">{{t "appSubtitle"}}</p>
     {{if .error}}<div class="alert alert-danger" role="alert">{{t .error}}</div>{{end}}
-    <form method="post" action="/login" novalidate>
+    <form method="post" action="{{appPath "/login"}}" novalidate>
       <input type="hidden" name="next" value="{{.next}}">
       <div class="mb-3"><label class="form-label" for="username">{{t "username"}}</label><input class="form-control" id="username" name="username" autocomplete="username" required autofocus></div>
       <div class="mb-4"><label class="form-label" for="password">{{t "password"}}</label><input class="form-control" id="password" name="password" type="password" autocomplete="current-password" required></div>

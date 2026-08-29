@@ -82,6 +82,7 @@ export GOFILE_API_TOKEN='replace-with-a-separate-random-token-of-at-least-32-cha
 | `-session-secret` | 空 | 会话签名密钥；显式提供时覆盖 `GOFILE_SESSION_SECRET`，至少 32 个字符 |
 | `-api-token` | 空 | API 上传 Token；显式提供时覆盖 `GOFILE_API_TOKEN`，至少 32 个字符 |
 | `-path` | 当前目录 | 受管文件根目录 |
+| `-base-path` | 空 | 公开访问的 URL 子目录，例如 `/gofile`。默认空值代表站点根目录；只能使用不带末尾 `/` 的 ASCII 绝对路径 |
 | `-port` | `8089` | 服务端口 |
 | `-host` | `127.0.0.1` | 监听地址。要在局域网访问时需显式设置，例如 `0.0.0.0` |
 | `-r` | `false` | 只读，只允许浏览、下载、预览、属性与批量 ZIP 下载 |
@@ -94,20 +95,22 @@ export GOFILE_API_TOKEN='replace-with-a-separate-random-token-of-at-least-32-cha
 默认服务只绑定本机：`http://127.0.0.1:8089`。若显式使用 `-host 0.0.0.0` 或局域网 IP，程序会拒绝使用非 Secure 会话 Cookie。请通过 Caddy 或 Nginx 终止 TLS，并同时使用 `-cookie-secure`：
 
 ```sh
-./goFile -host 127.0.0.1 -cookie-secure -path /srv/files
+./goFile -host 127.0.0.1 -cookie-secure -base-path /gofile -path /srv/files
 ```
+
+`-base-path` 是浏览器实际访问的公开路径，而不是由请求头推断的代理信息。例如公开地址为 `https://files.example.com/gofile/` 时使用 `-base-path /gofile`。反代可以保留该前缀后转发，也可以在转发前剥离该前缀，两种方式均可使用；goFile 不信任 `X-Forwarded-Prefix` 等请求头。会话 Cookie 会自动限定在该路径，不需要额外配置 `proxy_cookie_path`。
 
 然后由 HTTPS 反代转发到本机端口。若在非 loopback 地址直接运行 HTTP，必须额外显式传入 `-allow-insecure-lan`，这会让登录密码、会话与文件传输可被网络窃听，不适用于生产环境。预览仅以纯文本提供安全文本格式，HTML、SVG、PDF、图片和其他活跃或二进制内容会强制下载，避免上传内容在已登录管理域执行。
 
 ## API 上传
 
-脚本只允许使用独立 Token 调用上传接口，Token 不授予浏览、下载或文件管理权限：
+脚本只允许使用独立 Token 调用上传接口，Token 不授予浏览、下载或文件管理权限。以下示例对应 `-base-path /gofile`，默认根目录部署时去掉 `/gofile`：
 
 ```sh
 curl -H "Authorization: Bearer $GOFILE_API_TOKEN" \
   -F "path=logs" \
   -F "file=@/path/to/app.log" \
-  http://127.0.0.1:8089/api/upload
+  http://127.0.0.1:8089/gofile/api/upload
 ```
 
 ## 多选规则

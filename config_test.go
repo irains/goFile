@@ -26,6 +26,56 @@ func lookupEnvironment(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }
 
+func TestNormalizeBasePath(t *testing.T) {
+	for _, test := range []struct {
+		raw  string
+		want string
+		ok   bool
+	}{
+		{"", "", true},
+		{"/", "", true},
+		{"/gofile", "/gofile", true},
+		{"/tools/gofile", "/tools/gofile", true},
+		{"gofile", "", false},
+		{"/gofile/", "", false},
+		{"//gofile", "", false},
+		{"/gofile//files", "", false},
+		{"/gofile/../admin", "", false},
+		{"/gofile?x=1", "", false},
+		{"/gofile#fragment", "", false},
+		{"/gofile%2fadmin", "", false},
+		{"/gofile;admin", "", false},
+		{"/gofile/管理", "", false},
+		{"/gofile\\admin", "", false},
+		{"/gofile\x01admin", "", false},
+	} {
+		t.Run(test.raw, func(t *testing.T) {
+			got, err := normalizeBasePath(test.raw)
+			if (err == nil) != test.ok || got != test.want {
+				t.Fatalf("normalizeBasePath(%q) = %q, %v; want %q, valid=%t", test.raw, got, err, test.want, test.ok)
+			}
+		})
+	}
+}
+
+func TestParseStartupConfigConfiguresBasePathCookieScope(t *testing.T) {
+	config, err := parseStartupConfig([]string{"-base-path=/gofile"}, lookupEnvironment(validAuthEnvironment()), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.BasePath != "/gofile" || config.Auth.CookiePath != "/gofile" {
+		t.Fatalf("base path configuration = %#v", config)
+	}
+
+	config, err = parseStartupConfig(nil, lookupEnvironment(validAuthEnvironment()), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.BasePath != "" || config.Auth.CookiePath != "" {
+		t.Fatalf("root base path configuration = %#v", config)
+	}
+}
+
 func TestParseStartupConfigUsesEnvironmentFallback(t *testing.T) {
 	values := validAuthEnvironment()
 	config, err := parseStartupConfig(nil, lookupEnvironment(values), nil)

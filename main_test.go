@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +22,7 @@ func testManager(t *testing.T) *auth.Manager {
 		Username: "admin", PasswordHash: passwordHash,
 		SessionSecret: "0123456789abcdef0123456789abcdef",
 		APIToken:      "abcdef0123456789abcdef0123456789",
+		CookiePath:    basePath,
 	})
 	if err != nil { t.Fatal(err) }
 	return manager
@@ -38,6 +40,91 @@ func loginCookie(t *testing.T, router http.Handler) *http.Cookie {
 	cookies := response.Result().Cookies()
 	if len(cookies) != 1 { t.Fatal("expected session cookie") }
 	return cookies[0]
+}
+
+func TestSafeNextPathUsesPublicBase(t *testing.T) {
+	previousBasePath := basePath
+	basePath = "/gofile"
+	t.Cleanup(func() { basePath = previousBasePath })
+	for raw, want := range map[string]string{
+		"/d/logs":             "/gofile/d/logs",
+		"/gofile/d/logs":      "/gofile/d/logs",
+		"/gofile/../admin":    "/gofile/",
+		"https://example.com": "/gofile/",
+		"//example.com":       "/gofile/",
+	} {
+		if got := safeNextPath(raw); got != want {
+			t.Fatalf("safeNextPath(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestMountedBasePathRoutesAndGeneratesPublicURLs(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.GoFile, reader, uploader, basePath, templateSets
+	conf.GoFile, reader, uploader, basePath = t.TempDir(), false, false, "/gofile"
+	t.Cleanup(func() { conf.GoFile, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates })
+	if err := os.WriteFile(conf.GoFile+string(os.PathSeparator)+"a.txt", []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	handler := withBasePath(newRouter(testManager(t)))
+
+	request := httptest.NewRequest(http.MethodGet, "/gofile/d/a", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if location := response.Header().Get("Location"); location != "/gofile/login?next=%2Fgofile%2Fd%2Fa" {
+		t.Fatalf("mounted login redirect = %q", location)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/d/a", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if location := response.Header().Get("Location"); location != "/gofile/login?next=%2Fgofile%2Fd%2Fa" {
+		t.Fatalf("stripped-prefix login redirect = %q", location)
+	}
+
+	loginBody := url.Values{"username": []string{"admin"}, "password": []string{"a durable password"}, "next": []string{"/gofile/d/a"}}.Encode()
+	request = httptest.NewRequest(http.MethodPost, "/gofile/login", bytes.NewBufferString(loginBody))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if location := response.Header().Get("Location"); location != "/gofile/d/a" {
+		t.Fatalf("mounted login destination = %q", location)
+	}
+	cookie := response.Result().Cookies()[0]
+	if cookie.Path != "/gofile" {
+		t.Fatalf("mounted cookie path = %q", cookie.Path)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/gofile/", nil)
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("mounted listing status = %d", response.Code)
+	}
+	page := response.Body.String()
+	for _, want := range []string{"href=\"/gofile/\"", "href=\"/gofile/download/a.txt\"", "const appBase = \"/gofile\""} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("mounted listing missing %q", want)
+		}
+	}
+	if strings.Contains(page, "apiCommand") || strings.Contains(page, "copyApi") {
+		t.Fatal("listing still exposes API upload command")
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/gofile/login", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if !strings.Contains(response.Body.String(), "action=\"/gofile/login\"") {
+		t.Fatal("mounted login form action is not prefixed")
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/gofile-other/", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("base path lookalike status = %d", response.Code)
+	}
 }
 
 func TestRouterRequiresAuthentication(t *testing.T) {
