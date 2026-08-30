@@ -17,7 +17,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # gofmt output is platform-independent. Run this once on Linux so a Windows
+      # checkout's line-ending conversion cannot make an otherwise formatted tree fail.
       - name: Check formatting
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
