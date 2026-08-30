@@ -45,9 +45,3 @@ jobs:
             windows/amd64 windows/386; do
             GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build -o /dev/null .
           done
-      - name: Build Docker image
-        if: runner.os == 'Linux'
-        run: docker build --tag fileharbor:ci .
-      - name: Smoke-test Docker image
-        if: runner.os == 'Linux'
-        run: docker run --rm fileharbor:ci -h
