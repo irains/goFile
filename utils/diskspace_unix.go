@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || dragonfly || linux || solaris
 
 package utils
 
@@ -10,7 +10,7 @@ func DiskUsage(path string) (total, free uint64) {
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return 0, 0
 	}
-	total = stat.Blocks * uint64(stat.Bsize)
-	free = stat.Bavail * uint64(stat.Bsize)
+	total = uint64(stat.Blocks) * uint64(stat.Bsize)
+	free = uint64(stat.Bavail) * uint64(stat.Bsize)
 	return
 }

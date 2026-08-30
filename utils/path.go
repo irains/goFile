@@ -3,7 +3,7 @@ package utils
 import (
 	"errors"
 	"fmt"
-	"goFile/conf"
+	"github.com/irains/fileharbor/conf"
 	"io/fs"
 	"os"
 	"path"
@@ -13,7 +13,10 @@ import (
 	"unicode/utf8"
 )
 
-const MaxListEntries = 100
+const (
+	MaxListEntries            = 100
+	InternalUploadStagePrefix = ".fileharbor-upload-"
+)
 
 var (
 	ErrInvalidPath        = &OperationError{Code: "invalid_path"}
@@ -53,10 +56,10 @@ func ErrorCode(err error) string {
 // Root resolves the configured managed directory. Startup verifies it exists;
 // doing this here also keeps all handlers testable with a temporary root.
 func Root() (string, error) {
-	if conf.GoFile == "" {
+	if conf.FileHarbor == "" {
 		return "", ErrInvalidPath
 	}
-	absolute, err := filepath.Abs(conf.GoFile)
+	absolute, err := filepath.Abs(conf.FileHarbor)
 	if err != nil {
 		return "", ErrInvalidPath
 	}
@@ -104,9 +107,15 @@ func CleanRelative(raw string, allowRoot bool) (string, error) {
 	return cleaned, nil
 }
 
-func contained(root, candidate string) bool {
+// Contained reports whether candidate is the directory root or one of its descendants.
+// Both paths must already be absolute and cleaned by the caller.
+func Contained(root, candidate string) bool {
 	rel, err := filepath.Rel(root, candidate)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func contained(root, candidate string) bool {
+	return Contained(root, candidate)
 }
 
 // ResolveExisting returns a symlink-safe target. The final component is also
@@ -167,9 +176,9 @@ func ResolveDirectory(raw string, allowRoot bool) (string, string, os.FileInfo, 
 }
 
 // ValidateLeafName applies the portable subset of filename rules, so a name
-// accepted on one release target works on all of goFile's supported platforms.
+// accepted on every FileHarbor-supported platform.
 func ValidateLeafName(name string) error {
-	if name == "" || name == "." || name == ".." || !utf8.ValidString(name) || strings.ContainsAny(name, "/\\<>:\"|?*") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, InternalUploadStagePrefix) || !utf8.ValidString(name) || strings.ContainsAny(name, "/\\<>:\"|?*") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
 		return ErrInvalidName
 	}
 	for _, r := range name {

@@ -5,8 +5,8 @@
 <a class="skip-link" href="#workspace">{{t "dls"}}</a>
 <div class="app-shell">
   <header class="app-header">
-    <a class="brand" href="{{appPath "/"}}" aria-label="goFile {{t "dls"}}">
-      <span class="brand-mark">› goFile</span>
+    <a class="brand" href="{{appPath "/"}}" aria-label="FileHarbor {{t "dls"}}">
+      <span class="brand-mark">› FileHarbor</span>
       <span class="brand-subtitle">{{t "appSubtitle"}}</span>
     </a>
     <div class="user-menu">
@@ -121,9 +121,9 @@
 
     {{if .allowUpload}}
     <section class="upload-panel" aria-labelledby="uploadHeading">
-      <h2 class="h6 mb-3" id="uploadHeading">{{t "upload"}}</h2>
-      <div class="drop-zone" id="dropZone"><span>{{t "uploadHint"}}</span><input type="file" id="fileInput" aria-label="{{t "upload"}}"></div>
-      <div class="progress mt-3 d-none" id="uploadProgress" role="progressbar" aria-label="{{t "uploading"}}"><div class="progress-bar" id="uploadProgressBar" style="width:0%"></div></div>
+      <div class="d-flex align-items-baseline justify-content-between gap-3 mb-3"><h2 class="h6 mb-0" id="uploadHeading">{{t "upload"}}</h2><span class="small text-secondary" id="uploadQueueSummary">{{t "uploadQueueEmpty"}}</span></div>
+      <div class="drop-zone" id="dropZone"><span>{{t "uploadHint"}}</span><input type="file" id="fileInput" multiple aria-label="{{t "upload"}}"></div>
+      <div class="upload-queue" id="uploadQueue" role="list" aria-label="{{t "uploadQueue"}}"></div>
     </section>
     {{end}}
   </main>
@@ -172,7 +172,8 @@
     deleteTitle: {{js (t "deleteTitle")}}, deleteItems: {{js (t "deleteItems")}}, incomplete: {{js (t "incomplete")}},
     workspaceRoot: {{js (t "workspaceRoot")}}, useThisFolder: {{js (t "useThisFolder")}}, selectedDestination: {{js (t "selectedDestination")}},
     destinationRequired: {{js (t "destinationRequired")}}, loadingFolders: {{js (t "loadingFolders")}}, noSubfolders: {{js (t "noSubfolders")}},
-    invalid_path: {{js (t "invalid_path")}}, invalid_name: {{js (t "invalid_name")}}, not_found: {{js (t "not_found")}}, not_directory: {{js (t "not_directory")}}, destination_exists: {{js (t "destination_exists")}}, destination_same_directory: {{js (t "destination_same_directory")}}, source_changed: {{js (t "source_changed")}}, self_descendant: {{js (t "self_descendant")}}, cross_device_move: {{js (t "cross_device_move")}}, batch_limit_exceeded: {{js (t "batch_limit_exceeded")}}, archive_limit_exceeded: {{js (t "archive_limit_exceeded")}}, root_operation_forbidden: {{js (t "root_operation_forbidden")}}, io_error: {{js (t "io_error")}}, execution_partial: {{js (t "execution_partial")}}, delete_partial: {{js (t "delete_partial")}}, csrf_invalid: {{js (t "csrf_invalid")}}, unauthenticated: {{js (t "unauthenticated")}}, browser_session_required: {{js (t "browser_session_required")}}
+    uploadQueue: {{js (t "uploadQueue")}}, uploadQueueEmpty: {{js (t "uploadQueueEmpty")}}, uploadQueued: {{js (t "uploadQueued")}}, uploadPreparing: {{js (t "uploadPreparing")}}, uploadReselect: {{js (t "uploadReselect")}}, selectOriginalFile: {{js (t "selectOriginalFile")}}, verifyingFile: {{js (t "verifyingFile")}}, selectedFileMismatch: {{js (t "selectedFileMismatch")}}, uploading: {{js (t "uploading")}}, uploadFinalizing: {{js (t "uploadFinalizing")}}, uploadComplete: {{js (t "uploadComplete")}}, uploadCancelled: {{js (t "uploadCancelled")}}, uploadFailed: {{js (t "uploadFailed")}}, pause: {{js (t "pause")}}, uploadPaused: {{js (t "uploadPaused")}}, cancelUpload: {{js (t "cancelUpload")}}, cancellingUpload: {{js (t "cancellingUpload")}}, cancelFailed: {{js (t "cancelFailed")}}, retryCancel: {{js (t "retryCancel")}}, retry: {{js (t "retry")}}, retrying: {{js (t "retrying")}}, resume: {{js (t "resume")}}, removeFromQueue: {{js (t "removeFromQueue")}}, uploadStorageUnavailable: {{js (t "uploadStorageUnavailable")}}, resolveDestinationConflict: {{js (t "resolveDestinationConflict")}},
+    invalid_path: {{js (t "invalid_path")}}, invalid_name: {{js (t "invalid_name")}}, not_found: {{js (t "not_found")}}, not_directory: {{js (t "not_directory")}}, destination_exists: {{js (t "destination_exists")}}, destination_same_directory: {{js (t "destination_same_directory")}}, source_changed: {{js (t "source_changed")}}, self_descendant: {{js (t "self_descendant")}}, cross_device_move: {{js (t "cross_device_move")}}, batch_limit_exceeded: {{js (t "batch_limit_exceeded")}}, archive_limit_exceeded: {{js (t "archive_limit_exceeded")}}, root_operation_forbidden: {{js (t "root_operation_forbidden")}}, io_error: {{js (t "io_error")}}, execution_partial: {{js (t "execution_partial")}}, delete_partial: {{js (t "delete_partial")}}, csrf_invalid: {{js (t "csrf_invalid")}}, unauthenticated: {{js (t "unauthenticated")}}, browser_session_required: {{js (t "browser_session_required")}}, invalid_upload: {{js (t "invalid_upload")}}, invalid_part: {{js (t "invalid_part")}}, invalid_digest: {{js (t "invalid_digest")}}, upload_not_found: {{js (t "upload_not_found")}}, upload_expired: {{js (t "upload_expired")}}, upload_cancelled: {{js (t "upload_cancelled")}}, upload_too_large: {{js (t "upload_too_large")}}, size_mismatch: {{js (t "size_mismatch")}}, upload_busy: {{js (t "upload_busy")}}, upload_incomplete: {{js (t "upload_incomplete")}}, part_conflict: {{js (t "part_conflict")}}, insufficient_storage: {{js (t "insufficient_storage")}}
   };
   const rawPath = {{js .rawPath}};
   const appBase = {{js .basePath}};
@@ -344,10 +345,328 @@
   document.getElementById('confirmDelete').addEventListener('click', async () => { if (!deleteContext) return; setBusy(true); try { if (deleteContext.batch) await request('/do/batch/delete', {listing_token:listingToken, entries:deleteContext.entries}); else await formRequest('/do/rm', {path:deleteContext.row.dataset.path}); deleteModal.hide(); location.reload(); } catch (error) { showNotice(errorText(error), true); } finally { setBusy(false); } });
   document.getElementById('logoutButton').addEventListener('click', async () => { try { const response = await fetch(appURL('/logout'), {method:'POST', headers:{'X-CSRF-Token':csrf}}); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.code || 'operationFailed'); window.location.assign(appURL('/login')); } catch (error) { showNotice(errorText(error), true); } });
 
-  const input = document.getElementById('fileInput'); const drop = document.getElementById('dropZone'); const progress = document.getElementById('uploadProgress'); const progressBar = document.getElementById('uploadProgressBar');
-  async function uploadFile(file) { if (!file) return; setBusy(true); progress?.classList.remove('d-none'); if (progressBar) progressBar.style.width = '12%'; try { const data = new FormData(); data.append('file', file); const response = await fetch(appURL('/do/upload/' + encodeURIComponent(rawPath)), {method:'POST', headers:{'X-CSRF-Token':csrf}, body:data}); const result = await response.json(); if (!response.ok || !result.ok) throw new Error(result.code); if (progressBar) progressBar.style.width = '100%'; location.reload(); } catch (error) { showNotice(errorText(error), true); progress?.classList.add('d-none'); } finally { setBusy(false); } }
-  input?.addEventListener('change', () => uploadFile(input.files[0]));
-  drop?.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('dragover'); }); drop?.addEventListener('dragleave', () => drop.classList.remove('dragover')); drop?.addEventListener('drop', event => { event.preventDefault(); drop.classList.remove('dragover'); uploadFile(event.dataTransfer.files[0]); });
+  const input = document.getElementById('fileInput');
+  const drop = document.getElementById('dropZone');
+  const queue = document.getElementById('uploadQueue');
+  const queueSummary = document.getElementById('uploadQueueSummary');
+  const uploadScope = window.location.origin + appBase + '|' + {{js .username}};
+  const tasks = new Map();
+  const MAX_FILE_WORKERS = 2;
+  const MAX_TRANSIENT_RETRIES = 3;
+  const HASH_CHUNK_BYTES = 1 << 20;
+  let activeUploadWorkers = 0;
+  let schedulingUploads = false;
+  let uploadDB = null;
+  let listingRefreshNeeded = false;
+  let listingRefreshScheduled = false;
+
+  class QueueError extends Error {
+    constructor(code, status, transient) { super(code || 'operationFailed'); this.code = code || 'operationFailed'; this.status = status || 0; this.transient = !!transient; }
+  }
+
+  class SHA256 {
+    constructor() {
+      this.h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+      this.buffer = new Uint8Array(64);
+      this.length = 0;
+      this.bytes = 0;
+    }
+    update(data) {
+      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+      this.bytes += bytes.length;
+      let offset = 0;
+      while (offset < bytes.length) {
+        const size = Math.min(64 - this.length, bytes.length - offset);
+        this.buffer.set(bytes.subarray(offset, offset + size), this.length);
+        this.length += size;
+        offset += size;
+        if (this.length === 64) { this.transform(); this.length = 0; }
+      }
+      return this;
+    }
+    transform() {
+      const words = new Uint32Array(64);
+      for (let index = 0; index < 16; index++) {
+        const offset = index * 4;
+        words[index] = ((this.buffer[offset] << 24) | (this.buffer[offset + 1] << 16) | (this.buffer[offset + 2] << 8) | this.buffer[offset + 3]) >>> 0;
+      }
+      for (let index = 16; index < 64; index++) {
+        const a = words[index - 15]; const b = words[index - 2];
+        const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+        const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+        words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
+      }
+      const constants = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+      let [a, b, c, d, e, f, g, h] = this.h;
+      for (let index = 0; index < 64; index++) {
+        const s1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+        const choice = (e & f) ^ (~e & g);
+        const temp1 = (h + s1 + choice + constants[index] + words[index]) >>> 0;
+        const s0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+        const majority = (a & b) ^ (a & c) ^ (b & c);
+        const temp2 = (s0 + majority) >>> 0;
+        h = g; g = f; f = e; e = (d + temp1) >>> 0; d = c; c = b; b = a; a = (temp1 + temp2) >>> 0;
+      }
+      this.h[0] = (this.h[0] + a) >>> 0; this.h[1] = (this.h[1] + b) >>> 0; this.h[2] = (this.h[2] + c) >>> 0; this.h[3] = (this.h[3] + d) >>> 0;
+      this.h[4] = (this.h[4] + e) >>> 0; this.h[5] = (this.h[5] + f) >>> 0; this.h[6] = (this.h[6] + g) >>> 0; this.h[7] = (this.h[7] + h) >>> 0;
+    }
+    digest() {
+      const bitLength = this.bytes * 8;
+      this.buffer[this.length++] = 0x80;
+      if (this.length > 56) { this.buffer.fill(0, this.length); this.transform(); this.length = 0; }
+      this.buffer.fill(0, this.length, 56);
+      const high = Math.floor(bitLength / 0x100000000);
+      const low = bitLength >>> 0;
+      this.buffer[56] = high >>> 24; this.buffer[57] = high >>> 16; this.buffer[58] = high >>> 8; this.buffer[59] = high;
+      this.buffer[60] = low >>> 24; this.buffer[61] = low >>> 16; this.buffer[62] = low >>> 8; this.buffer[63] = low;
+      this.transform();
+      return Array.from(this.h, value => value.toString(16).padStart(8, '0')).join('');
+    }
+  }
+
+  function randomHex(bytes) { const values = new Uint8Array(bytes); crypto.getRandomValues(values); return Array.from(values, value => value.toString(16).padStart(2, '0')).join(''); }
+  function queueErrorText(task) { if (task.error === 'destination_exists') return strings.resolveDestinationConflict; return strings[task.error] || strings.uploadFailed; }
+  function uploadStateText(task) {
+    if (task.error) return queueErrorText(task);
+    switch (task.state) {
+      case 'preparing': return strings.uploadPreparing;
+      case 'verifying': return strings.verifyingFile;
+      case 'reselect': return strings.uploadReselect;
+      case 'queued': return strings.uploadQueued;
+      case 'uploading': return strings.uploading;
+      case 'retrying': return strings.retrying;
+      case 'paused': return strings.uploadPaused;
+      case 'finalizing': return strings.uploadFinalizing;
+      case 'completed': return strings.uploadComplete;
+      case 'cancelled': return strings.uploadCancelled;
+      case 'cancelling': return strings.cancellingUpload;
+      default: return strings.uploadFailed;
+    }
+  }
+  function queueProgress(task) {
+    const confirmed = task.status && Number.isFinite(task.status.received_bytes) ? task.status.received_bytes : 0;
+    return Math.max(0, Math.min(task.size, confirmed + (task.currentPartBytes || 0)));
+  }
+  function announceUpload(task) { live.textContent = task.name + ': ' + uploadStateText(task); }
+  function setTaskState(task, state, error, announce) { task.state = state; task.error = error || ''; renderUploadQueue(); if (announce) announceUpload(task); }
+  function renderUploadQueue() {
+    if (!queue) return;
+    queue.replaceChildren();
+    const items = Array.from(tasks.values());
+    if (queueSummary) queueSummary.textContent = items.length ? items.length + ' ' + strings.uploadQueued : strings.uploadQueueEmpty;
+    items.forEach(task => {
+      const row = document.createElement('article'); row.className = 'upload-row'; row.dataset.state = task.error || task.state; row.setAttribute('role', 'listitem');
+      const header = document.createElement('div'); header.className = 'upload-row-header';
+      const name = document.createElement('span'); name.className = 'upload-row-name'; name.textContent = task.name;
+      const size = document.createElement('span'); size.className = 'upload-row-meta'; size.textContent = formatBytes(task.size);
+      header.append(name, size);
+      const meta = document.createElement('div'); meta.className = 'upload-row-meta'; meta.textContent = displayFolderPath(task.path);
+      const progress = document.createElement('div'); progress.className = 'progress upload-row-progress'; progress.setAttribute('role', 'progressbar'); progress.setAttribute('aria-label', task.name); progress.setAttribute('aria-valuemin', '0'); progress.setAttribute('aria-valuemax', String(task.size));
+      const progressValue = queueProgress(task); progress.setAttribute('aria-valuenow', String(progressValue)); progress.setAttribute('aria-valuetext', formatBytes(progressValue) + ' / ' + formatBytes(task.size));
+      const bar = document.createElement('div'); bar.className = 'progress-bar'; bar.style.width = (task.size ? Math.min(100, progressValue * 100 / task.size) : 100) + '%'; progress.append(bar);
+      const footer = document.createElement('div'); footer.className = 'upload-row-footer';
+      const status = document.createElement('span'); status.className = 'upload-row-status' + (task.error ? ' error' : ''); status.textContent = uploadStateText(task);
+      const actions = document.createElement('div'); actions.className = 'upload-row-actions';
+      const addButton = (label, action, danger) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-sm ' + (danger ? 'btn-outline-danger' : 'btn-outline-secondary'); button.textContent = label; button.addEventListener('click', () => action(task)); actions.append(button); };
+      if (task.state === 'reselect' || !task.file && task.state !== 'completed' && task.state !== 'cancelled') addButton(strings.selectOriginalFile, selectOriginalFile);
+      if (task.state === 'paused') addButton(strings.resume, resumeUpload);
+      if (task.state === 'queued' || task.state === 'uploading' || task.state === 'retrying' || task.state === 'preparing' || task.state === 'verifying') addButton(strings.pause, pauseUpload);
+      if (task.cancelFailed) addButton(strings.retryCancel, cancelUpload);
+      else if (task.error && task.error !== 'upload_cancelled' && task.error !== 'upload_expired' && task.error !== 'upload_not_found') addButton(strings.retry, retryUpload);
+      if (task.state === 'cancelled' || task.state === 'completed' || task.error === 'upload_expired' || task.error === 'upload_not_found') addButton(strings.removeFromQueue, removeUpload);
+      else if (task.state !== 'cancelling') addButton(strings.cancelUpload, cancelUpload, true);
+      footer.append(status, actions); row.append(header, meta, progress, footer);
+      const reselect = document.createElement('input'); reselect.type = 'file'; reselect.className = 'upload-reselect'; reselect.setAttribute('aria-label', strings.selectOriginalFile + ': ' + task.name); reselect.addEventListener('change', () => { const file = reselect.files && reselect.files[0]; reselect.value = ''; if (file) bindReselectedFile(task, file); }); task.reselectInput = reselect; row.append(reselect);
+      queue.append(row);
+    });
+  }
+  function selectOriginalFile(task) { task.reselectInput?.click(); }
+  function openUploadDB() { return new Promise((resolve, reject) => { const request = indexedDB.open('fileharbor-reliable-uploads', 1); request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains('uploads')) request.result.createObjectStore('uploads', {keyPath: 'id'}); }; request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error || new Error('indexeddb')); }); }
+  function withUploadStore(mode, work) { return new Promise((resolve, reject) => { if (!uploadDB) { reject(new Error('indexeddb')); return; } const transaction = uploadDB.transaction('uploads', mode); let result; try { result = work(transaction.objectStore('uploads')); } catch (error) { reject(error); return; } transaction.oncomplete = () => resolve(result && 'result' in result ? result.result : result); transaction.onerror = () => reject(transaction.error || new Error('indexeddb')); transaction.onabort = () => reject(transaction.error || new Error('indexeddb')); }); }
+  function uploadRecord(task) { return {version: 1, id: task.id, token: task.token, scope: uploadScope, path: task.path, name: task.name, size: task.size, lastModified: task.lastModified, sha256: task.sha256, createdAt: task.createdAt}; }
+  function saveUpload(task) { return withUploadStore('readwrite', store => store.put(uploadRecord(task))); }
+  function deleteUpload(task) { return withUploadStore('readwrite', store => store.delete(task.id)); }
+  function loadUploads() { return withUploadStore('readonly', store => ({result: store.getAll()})); }
+  async function hashBlob(blob, task) {
+    const hash = new SHA256();
+    for (let offset = 0; offset < blob.size; offset += HASH_CHUNK_BYTES) {
+      if (task.intent === 'paused' || task.intent === 'cancel') throw new QueueError('aborted');
+      hash.update(new Uint8Array(await blob.slice(offset, Math.min(blob.size, offset + HASH_CHUNK_BYTES)).arrayBuffer()));
+    }
+    return hash.digest();
+  }
+  async function uploadRequest(path, method, body, token, headers) {
+    const requestHeaders = Object.assign({}, headers || {});
+    if (token) requestHeaders['X-Upload-Token'] = token;
+    if (method !== 'GET') requestHeaders['X-CSRF-Token'] = csrf;
+    let response;
+    try { response = await fetch(appURL(path), {method, headers: requestHeaders, body}); } catch (_) { throw new QueueError('operationFailed', 0, true); }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new QueueError(data.code || 'operationFailed', response.status, response.status >= 500);
+    return data.upload || data;
+  }
+  async function reconcileUpload(task) {
+    try { task.status = await uploadRequest('/api/uploads/' + encodeURIComponent(task.id), 'GET', undefined, task.token); }
+    catch (error) {
+      if (error.code === 'upload_expired' || error.code === 'upload_cancelled' || error.code === 'upload_not_found') { setTaskState(task, 'failed', error.code, true); return false; }
+      throw error;
+    }
+    if (task.status.state === 'completed') { await completeLocalUpload(task); return false; }
+    if (task.status.state === 'cancelled') { setTaskState(task, 'cancelled', '', true); return false; }
+    return task.status.state === 'active';
+  }
+  async function createUpload(task) {
+    task.status = await uploadRequest('/api/uploads', 'POST', JSON.stringify({path: task.path, name: task.name, size: task.size, sha256: task.sha256}), task.token, {'Content-Type': 'application/json', 'X-Upload-ID': task.id});
+    return task.status;
+  }
+  function missingPart(task) {
+    if (!task.status) return -1;
+    const ranges = Array.isArray(task.status.received) ? task.status.received : [];
+    for (let index = 0; index < task.status.part_count; index++) if (!ranges.some(range => index >= range.start && index <= range.end)) return index;
+    return -1;
+  }
+  function partBounds(status, index) { const start = index * status.chunk_bytes; return [start, Math.min(status.size, start + status.chunk_bytes)]; }
+  function uploadPart(task, index) {
+    return new Promise(async (resolve, reject) => {
+      let body; let digest;
+      try { const bounds = partBounds(task.status, index); body = task.file.slice(bounds[0], bounds[1]); digest = await hashBlob(body, task); } catch (error) { reject(error); return; }
+      if (task.intent === 'paused' || task.intent === 'cancel') { reject(new QueueError('aborted')); return; }
+      const xhr = new XMLHttpRequest(); task.xhr = xhr; task.currentPartBytes = 0; renderUploadQueue();
+      xhr.open('PUT', appURL('/api/uploads/' + encodeURIComponent(task.id) + '/parts/' + index));
+      xhr.setRequestHeader('X-CSRF-Token', csrf); xhr.setRequestHeader('X-Upload-Token', task.token); xhr.setRequestHeader('X-Upload-Part-SHA256', digest); xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.upload.onprogress = event => { if (event.lengthComputable) { task.currentPartBytes = event.loaded; renderUploadQueue(); } };
+      xhr.onerror = () => reject(new QueueError('operationFailed', 0, true));
+      xhr.onabort = () => reject(new QueueError('aborted'));
+      xhr.onload = () => { task.xhr = null; task.currentPartBytes = 0; let data = {}; try { data = JSON.parse(xhr.responseText); } catch (_) {} if (xhr.status >= 200 && xhr.status < 300 && data.ok) { resolve(data.upload); return; } reject(new QueueError(data.code || 'operationFailed', xhr.status, xhr.status >= 500)); };
+      xhr.send(body);
+    });
+  }
+  async function retryAfterTransientFailure(task, error) {
+    for (let attempt = 0; attempt < MAX_TRANSIENT_RETRIES; attempt++) {
+      if (task.intent === 'paused' || task.intent === 'cancel') return false;
+      setTaskState(task, 'retrying', '', true);
+      await new Promise(resolve => { task.retryTimer = setTimeout(resolve, 500 * (1 << attempt)); }); task.retryTimer = null;
+      if (task.intent === 'paused' || task.intent === 'cancel') return false;
+      try { if (!await reconcileUpload(task)) return false; return true; } catch (reconcileError) { if (!reconcileError.transient) throw reconcileError; error = reconcileError; }
+    }
+    throw error;
+  }
+  async function retryCreateAfterTransientFailure(task, error) {
+    for (let attempt = 0; attempt < MAX_TRANSIENT_RETRIES; attempt++) {
+      if (task.intent === 'paused' || task.intent === 'cancel') return false;
+      setTaskState(task, 'retrying', '', true);
+      await new Promise(resolve => { task.retryTimer = setTimeout(resolve, 500 * (1 << attempt)); }); task.retryTimer = null;
+      if (task.intent === 'paused' || task.intent === 'cancel') return false;
+      try { await createUpload(task); return true; } catch (createError) { if (!createError.transient) throw createError; error = createError; }
+    }
+    throw error;
+  }
+  async function completeLocalUpload(task) { task.currentPartBytes = 0; task.intent = ''; await deleteUpload(task); setTaskState(task, 'completed', '', true); listingRefreshNeeded = true; maybeRefreshListing(); }
+  async function runUpload(task) {
+    if (task.running || !task.file || task.intent === 'paused' || task.intent === 'cancel') return;
+    task.running = true;
+    try {
+      setTaskState(task, 'queued');
+      if (!task.status) {
+        try { await createUpload(task); }
+        catch (error) { if (!error.transient || !await retryCreateAfterTransientFailure(task, error)) return; }
+      }
+      if (!await reconcileUpload(task)) return;
+      while (true) {
+        if (task.intent === 'paused' || task.intent === 'cancel') return;
+        const index = missingPart(task);
+        if (index < 0) break;
+        setTaskState(task, 'uploading');
+        try { task.status = await uploadPart(task, index); }
+        catch (error) { if (error.code === 'aborted' && (task.intent === 'paused' || task.intent === 'cancel')) return; if (!error.transient || !await retryAfterTransientFailure(task, error)) return; }
+      }
+      setTaskState(task, 'finalizing');
+      for (;;) {
+        if (task.intent === 'paused' || task.intent === 'cancel') return;
+        try { task.status = await uploadRequest('/api/uploads/' + encodeURIComponent(task.id) + '/complete', 'POST', undefined, task.token); break; }
+        catch (error) { if (!error.transient || !await retryAfterTransientFailure(task, error)) return; if (task.status && task.status.state === 'completed') return; }
+      }
+      if (task.status.state === 'completed') await completeLocalUpload(task);
+    } catch (error) { setTaskState(task, 'failed', error.code || 'operationFailed', true); }
+    finally { task.currentPartBytes = 0; task.xhr = null; task.running = false; renderUploadQueue(); scheduleUploads(); }
+  }
+  function scheduleUploads() {
+    if (schedulingUploads) return;
+    schedulingUploads = true;
+    queueMicrotask(() => {
+      schedulingUploads = false;
+      while (activeUploadWorkers < MAX_FILE_WORKERS) {
+        const task = Array.from(tasks.values()).find(candidate => !candidate.running && candidate.file && candidate.state === 'queued' && candidate.intent !== 'paused' && candidate.intent !== 'cancel');
+        if (!task) break;
+        activeUploadWorkers++;
+        runUpload(task).finally(() => { activeUploadWorkers--; scheduleUploads(); });
+      }
+    });
+  }
+  async function prepareTask(task) {
+    const hasPersistedDigest = !!task.sha256;
+    setTaskState(task, hasPersistedDigest ? 'verifying' : 'preparing', '', true);
+    try {
+      const digest = await hashBlob(task.file, task);
+      if (task.intent === 'cancel') { await removeUpload(task); return; }
+      if (task.intent === 'paused') { setTaskState(task, 'paused', '', true); return; }
+      if (hasPersistedDigest && digest !== task.sha256) { task.file = null; setTaskState(task, 'reselect', 'selectedFileMismatch', true); return; }
+      if (!hasPersistedDigest) { task.sha256 = digest; await saveUpload(task); }
+      task.needsHash = false;
+      if (hasPersistedDigest) { task.status = null; if (!await reconcileUpload(task)) return; }
+      setTaskState(task, 'queued', '', true);
+      scheduleUploads();
+    } catch (error) {
+      if (error.code === 'aborted' && task.intent === 'cancel') { await removeUpload(task); return; }
+      if (error.code === 'aborted' && task.intent === 'paused') { setTaskState(task, 'paused', '', true); return; }
+      setTaskState(task, hasPersistedDigest ? 'reselect' : 'failed', error.code || 'operationFailed', true);
+    }
+  }
+  async function prepareNewUpload(file) {
+    if (!uploadDB) { showNotice(strings.uploadStorageUnavailable, true); return; }
+    const task = {id: randomHex(16), token: randomHex(32), path: rawPath, name: file.name, size: file.size, lastModified: file.lastModified, sha256: '', createdAt: Date.now(), file, state: 'preparing', error: '', intent: '', status: null, currentPartBytes: 0, xhr: null, running: false, retryTimer: null, cancelFailed: false, needsHash: true};
+    tasks.set(task.id, task); renderUploadQueue();
+    await prepareTask(task);
+  }
+  async function bindReselectedFile(task, file) {
+    if (file.name !== task.name || file.size !== task.size) { setTaskState(task, 'reselect', 'selectedFileMismatch', true); return; }
+    task.intent = ''; task.file = file; task.lastModified = file.lastModified; task.needsHash = true;
+    await prepareTask(task);
+  }
+  function pauseUpload(task) { task.intent = 'paused'; if (task.retryTimer) { clearTimeout(task.retryTimer); task.retryTimer = null; } if (task.xhr) task.xhr.abort(); setTaskState(task, 'paused', '', true); maybeRefreshListing(); }
+  function resumeUpload(task) { task.intent = ''; if (!task.file) { task.error = ''; setTaskState(task, 'reselect', '', true); return; } if (task.needsHash) { prepareTask(task); return; } setTaskState(task, 'queued', '', true); scheduleUploads(); }
+  function retryUpload(task) { task.error = ''; task.cancelFailed = false; task.intent = ''; if (!task.file) { setTaskState(task, 'reselect', '', true); return; } if (task.needsHash) { prepareTask(task); return; } setTaskState(task, 'queued', '', true); scheduleUploads(); }
+  async function cancelUpload(task) {
+    task.intent = 'cancel'; task.cancelFailed = false; if (task.retryTimer) { clearTimeout(task.retryTimer); task.retryTimer = null; } if (task.xhr) task.xhr.abort();
+    if (!task.status) { await removeUpload(task); return; }
+    setTaskState(task, 'cancelling', '', true);
+    try { await uploadRequest('/api/uploads/' + encodeURIComponent(task.id), 'DELETE', undefined, task.token); await deleteUpload(task); tasks.delete(task.id); renderUploadQueue(); announceUpload({name: task.name, state: 'cancelled'}); }
+    catch (error) { try { if (!await reconcileUpload(task) && task.state === 'cancelled') { await deleteUpload(task); tasks.delete(task.id); renderUploadQueue(); return; } } catch (_) {} task.intent = ''; task.cancelFailed = true; setTaskState(task, 'failed', 'cancelFailed', true); }
+  }
+  async function removeUpload(task) { if (task.xhr) task.xhr.abort(); if (task.retryTimer) clearTimeout(task.retryTimer); try { await deleteUpload(task); } catch (_) {} tasks.delete(task.id); renderUploadQueue(); maybeRefreshListing(); }
+  function maybeRefreshListing() {
+    if (!listingRefreshNeeded || listingRefreshScheduled) return;
+    const needsPage = Array.from(tasks.values()).some(task => task.file || ['preparing', 'verifying', 'queued', 'uploading', 'retrying', 'finalizing', 'cancelling'].includes(task.state));
+    if (!needsPage) { listingRefreshScheduled = true; setTimeout(() => location.reload(), 450); }
+  }
+  async function restoreUploads() {
+    try {
+      uploadDB = await openUploadDB();
+      const records = await loadUploads();
+      for (const record of records) {
+        if (record.version !== 1 || record.scope !== uploadScope || !record.id || !record.token || !record.sha256) continue;
+        const task = Object.assign({file: null, state: 'reselect', error: '', intent: '', status: null, currentPartBytes: 0, xhr: null, running: false, retryTimer: null, cancelFailed: false, needsHash: true}, record);
+        tasks.set(task.id, task);
+      }
+      renderUploadQueue();
+      for (const task of tasks.values()) { try { await reconcileUpload(task); } catch (error) { setTaskState(task, 'reselect', error.code || 'operationFailed'); } }
+    } catch (_) { uploadDB = null; if (input) { input.disabled = true; drop?.setAttribute('aria-disabled', 'true'); } showNotice(strings.uploadStorageUnavailable, true); }
+  }
+  input?.addEventListener('change', () => { const files = Array.from(input.files || []); input.value = ''; files.forEach(file => prepareNewUpload(file)); });
+  drop?.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('dragover'); });
+  drop?.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+  drop?.addEventListener('drop', event => { event.preventDefault(); drop.classList.remove('dragover'); Array.from(event.dataTransfer.files || []).forEach(file => prepareNewUpload(file)); });
+  if (queue) restoreUploads();
 })();
 </script>
 </body>

@@ -2,7 +2,7 @@ package utils
 
 import (
 	"errors"
-	"goFile/auth"
+	"github.com/irains/fileharbor/auth"
 	"io/fs"
 	"os"
 	"path/filepath"

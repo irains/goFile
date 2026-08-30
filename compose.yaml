@@ -1,18 +1,25 @@
 services:
-  gofile:
+  fileharbor:
     build:
       context: .
       dockerfile: Dockerfile
-    image: gofile:local
+    image: fileharbor:local
     env_file:
-      - ./gofile.env
+      - ./fileharbor.env
     ports:
       - "127.0.0.1:8089:8089"
     volumes:
-      - gofile-data:/data
+      - fileharbor-data:/data
+      - fileharbor-state:/state
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8089/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=256m
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=512m
     cap_drop:
       - ALL
     security_opt:
@@ -20,6 +27,8 @@ services:
     pids_limit: 256
     mem_limit: 512m
     restart: unless-stopped
+    stop_grace_period: 20s
 
 volumes:
-  gofile-data:
+  fileharbor-data:
+  fileharbor-state:

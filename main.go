@@ -1,22 +1,20 @@
 package main
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"goFile/assets"
-	"goFile/auth"
-	"goFile/conf"
-	"goFile/i18n"
-	"goFile/utils"
 	"html/template"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,18 +22,35 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
+	"github.com/irains/fileharbor/assets"
+	"github.com/irains/fileharbor/auth"
+	"github.com/irains/fileharbor/conf"
+	"github.com/irains/fileharbor/i18n"
+	"github.com/irains/fileharbor/utils"
 )
 
 var (
-	reader           bool
-	uploader         bool
-	cookieSecure     bool
-	allowInsecureLAN bool
-	basePath         string
-	templateSets     map[i18n.LangType]*template.Template
+	reader       bool
+	uploader     bool
+	basePath     string
+	templateSets map[i18n.LangType]*template.Template
+	uploads      *UploadStore
 )
 
-const contextAuthInfo = "authInfo"
+var (
+	maxUploadBodyBytes   = int64(256 << 20)
+	maxChunkBodyBytes    = int64(64 << 20)
+	maxChunkStateBytes   = int64(512 << 20)
+	maxChunkStorageBytes = int64(2 << 30)
+	maxEditorBytes       = int64(8 << 20)
+
+	errForcedShutdown = errors.New("forced shutdown")
+)
+
+const (
+	maxChunkCount   = 4096
+	contextAuthInfo = "authInfo"
+)
 
 func initTemplates() {
 	templateSets = make(map[i18n.LangType]*template.Template)
@@ -106,7 +121,7 @@ func renderHTML(c *gin.Context, name string, data gin.H) {
 	info := authInfo(c)
 	data["csrf"] = info.CSRF
 	data["username"] = info.Username
-	if total, free := utils.DiskUsage(conf.GoFile); total > 0 {
+	if total, free := utils.DiskUsage(conf.FileHarbor); total > 0 {
 		used := total - free
 		data["diskPct"] = int(used * 100 / total)
 		data["diskFree"] = formatBytes(free)
@@ -117,20 +132,163 @@ func renderHTML(c *gin.Context, name string, data gin.H) {
 	}
 }
 
-func logAction(c *gin.Context, typ, path string) {
-	fmt.Printf("%s  [%s]  %s  %s\n", time.Now().Format("2006-01-02 15:04:05"), typ, c.ClientIP(), path)
+func recordAction(state *RuntimeState, c *gin.Context, event, outcome, path, code string, affected int) error {
+	info := authInfo(c)
+	principal := info.Username
+	authMethod := "session"
+	if info.Bearer {
+		principal = "api-token"
+		authMethod = "bearer"
+	}
+	return state.Record(AuditEvent{
+		Event:      event,
+		Outcome:    outcome,
+		Principal:  principal,
+		AuthMethod: authMethod,
+		ClientIP:   c.ClientIP(),
+		Path:       path,
+		Affected:   affected,
+		Code:       code,
+	})
 }
 
-func chunkDir(fileID string) string {
-	if fileID == "" || len(fileID) > 128 || strings.ContainsAny(fileID, "/\\") {
+func logAction(state *RuntimeState, c *gin.Context, event, path string) error {
+	return recordAction(state, c, event, "success", path, "", 0)
+}
+
+// finishMutation never reports success after its durable success record fails.
+// The filesystem effect may already be committed, so callers must not attempt a
+// generic rollback. RuntimeState disables readiness to block further mutations.
+func finishMutation(c *gin.Context, state *RuntimeState, event, path string, affected int) bool {
+	if err := recordAction(state, c, event, "success", path, "", affected); err == nil {
+		return true
+	}
+	setPrivateResponse(c)
+	c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "audit_unavailable"})
+	return false
+}
+
+func requireAudit(c *gin.Context, state *RuntimeState, event, path string, affected int) bool {
+	info := authInfo(c)
+	principal := info.Username
+	authMethod := "session"
+	if info.Bearer {
+		principal = "api-token"
+		authMethod = "bearer"
+	}
+	if err := state.Record(AuditEvent{
+		Event:      event,
+		Outcome:    "attempted",
+		Principal:  principal,
+		AuthMethod: authMethod,
+		ClientIP:   c.ClientIP(),
+		Path:       path,
+		Affected:   affected,
+	}); err != nil {
+		setPrivateResponse(c)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "audit_unavailable"})
+		return false
+	}
+	return true
+}
+
+func mutationAuditMiddleware(state *RuntimeState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if state.Ready() {
+			c.Next()
+			return
+		}
+		setPrivateResponse(c)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "audit_unavailable"})
+		c.Abort()
+	}
+}
+
+func chunkDir(state *RuntimeState, fileID string) string {
+	if state == nil || !validChunkID(fileID) {
 		return ""
 	}
-	base := filepath.Join(os.TempDir(), "goFile-chunks")
+	base := state.ChunksDir
 	dir := filepath.Clean(filepath.Join(base, fileID))
 	if !strings.HasPrefix(dir, base+string(filepath.Separator)) {
 		return ""
 	}
 	return dir
+}
+
+func validChunkID(fileID string) bool {
+	if fileID == "" || len(fileID) > 128 {
+		return false
+	}
+	for _, r := range fileID {
+		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func chunkDirSize(dir string) (int64, error) {
+	var size int64
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !isChunkFileName(entry.Name()) {
+			return 0, errors.New("invalid chunk state")
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return 0, errors.New("invalid chunk state")
+		}
+		if info.Size() < 0 || size > maxChunkStateBytes-info.Size() {
+			return maxChunkStateBytes + 1, nil
+		}
+		size += info.Size()
+	}
+	return size, nil
+}
+
+func chunkStorageSize(chunksDir string) (int64, error) {
+	var size int64
+	entries, err := os.ReadDir(chunksDir)
+	if err != nil {
+		return 0, err
+	}
+	for _, entry := range entries {
+		if !validChunkID(entry.Name()) {
+			return 0, errors.New("invalid chunk state")
+		}
+		info, err := entry.Info()
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return 0, errors.New("invalid chunk state")
+		}
+		entrySize, err := chunkDirSize(filepath.Join(chunksDir, entry.Name()))
+		if err != nil || entrySize < 0 || size > maxChunkStorageBytes-entrySize {
+			if err != nil {
+				return 0, err
+			}
+			return maxChunkStorageBytes + 1, nil
+		}
+		size += entrySize
+	}
+	return size, nil
+}
+
+func isChunkFileName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func wantsJSON(c *gin.Context) bool {
@@ -187,12 +345,10 @@ func safeNextPath(raw string) string {
 	if !isSafeAppPath(internalPath) {
 		return appPath("/")
 	}
-	return appPath(internalPath) + func() string {
-		if parsed.RawQuery == "" {
-			return ""
-		}
-		return "?" + parsed.RawQuery
-	}()
+	if parsed.RawQuery == "" {
+		return appPath(internalPath)
+	}
+	return appPath(internalPath) + "?" + parsed.RawQuery
 }
 
 func withBasePath(next http.Handler) http.Handler {
@@ -230,10 +386,7 @@ func hiddenNotFound(c *gin.Context) {
 
 func authRequired(manager *auth.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Bearer credentials deliberately authorize only the documented script
-		// upload endpoint. Browser and filesystem-management routes require a
-		// session cookie, so a leaked automation token cannot administer files.
-		if c.Request.URL.Path == "/api/upload" && manager.IsBearerToken(c.GetHeader("Authorization")) {
+		if (c.Request.URL.Path == "/api/upload" || c.Request.URL.Path == "/api/uploads" || strings.HasPrefix(c.Request.URL.Path, "/api/uploads/")) && manager.IsBearerToken(c.GetHeader("Authorization")) {
 			c.Set(contextAuthInfo, auth.Info{Bearer: true})
 			c.Next()
 			return
@@ -289,9 +442,6 @@ func pathFromParam(raw string) string {
 }
 
 func setSafeFilePreviewHeaders(c *gin.Context) {
-	// Managed content can originate from the limited Bearer upload API. Text previews
-	// are deliberately rendered as plain text in a sandboxed document, never as
-	// browser-interpreted active content in this application's authenticated origin.
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; sandbox")
@@ -306,7 +456,7 @@ func isInlinePreviewable(name string) bool {
 	}
 }
 
-func renderDirectory(c *gin.Context, manager *auth.Manager, rawPath string) {
+func renderDirectory(c *gin.Context, manager *auth.Manager, state *RuntimeState, rawPath string) {
 	cleanPath, err := utils.CleanRelative(rawPath, true)
 	if err != nil {
 		hiddenNotFound(c)
@@ -329,7 +479,7 @@ func renderDirectory(c *gin.Context, manager *auth.Manager, rawPath string) {
 	if cleanPath != "" {
 		pagePath = cleanPath + "/"
 	}
-	logAction(c, "浏览", pagePath)
+	_ = logAction(state, c, "directory.list", pagePath)
 	renderHTML(c, "index.tmpl", gin.H{
 		"info":         info,
 		"path":         pagePath,
@@ -368,6 +518,50 @@ func writeUploadedFile(destination string, uploaded io.Reader) error {
 	return nil
 }
 
+func boundedMultipartBody(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadBodyBytes)
+}
+
+func boundedChunkBody(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxChunkBodyBytes)
+}
+
+func boundedFormBody(limit int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+		defer cleanupMultipartFiles(c)
+		contentType := c.GetHeader("Content-Type")
+		var err error
+		switch {
+		case strings.HasPrefix(contentType, "multipart/form-data"):
+			err = c.Request.ParseMultipartForm(1 << 20)
+		case strings.HasPrefix(contentType, "application/x-www-form-urlencoded"):
+			err = c.Request.ParseForm()
+		}
+		if err != nil {
+			multipartError(c, err, utils.ErrInvalidPath)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func multipartError(c *gin.Context, err error, fallback error) {
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
+		return
+	}
+	jsonError(c, http.StatusBadRequest, fallback)
+}
+
+func cleanupMultipartFiles(c *gin.Context) {
+	if form := c.Request.MultipartForm; form != nil {
+		_ = form.RemoveAll()
+	}
+}
+
 func uploadDestination(parent, name string) (string, string, error) {
 	if err := utils.ValidateLeafName(name); err != nil {
 		return "", "", err
@@ -403,12 +597,27 @@ func decodeBatch(c *gin.Context, manager *auth.Manager) (utils.Selection, batchR
 	return selection, request, err
 }
 
-func newRouter(manager *auth.Manager) *gin.Engine {
+func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
+	if state == nil {
+		panic("runtime state is required")
+	}
 	initTemplates()
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	_ = router.SetTrustedProxies(nil)
 	router.Use(gin.Recovery(), LangMiddleware())
+	router.GET("/healthz", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	router.GET("/readyz", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		if !state.Ready() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "shutting_down"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
 	router.GET("/login", func(c *gin.Context) {
 		setPrivateResponse(c)
 		if _, ok := manager.SessionFromRequest(c.Request); ok {
@@ -417,12 +626,17 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		}
 		renderHTML(c, "login.tmpl", gin.H{"next": safeNextPath(c.Query("next"))})
 	})
-	router.POST("/login", func(c *gin.Context) {
+	router.POST("/login", boundedFormBody(64<<10), func(c *gin.Context) {
 		setPrivateResponse(c)
 		username := c.PostForm("username")
 		password := c.PostForm("password")
 		info, signedID, expiry, err := manager.Login(c.ClientIP(), username, password)
 		if err != nil {
+			outcome := "failure"
+			if errors.Is(err, auth.ErrRateLimited) {
+				outcome = "rate_limited"
+			}
+			_ = state.Record(AuditEvent{Event: "auth.login", Outcome: outcome, AuthMethod: "session", ClientIP: c.ClientIP()})
 			if !errors.Is(err, auth.ErrInvalidCredentials) && !errors.Is(err, auth.ErrRateLimited) {
 				c.Status(http.StatusInternalServerError)
 				return
@@ -435,21 +649,22 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 			renderHTML(c, "login.tmpl", gin.H{"error": "loginFailed", "next": safeNextPath(c.PostForm("next"))})
 			return
 		}
-		_ = info
+		_ = state.Record(AuditEvent{Event: "auth.login", Outcome: "success", Principal: info.Username, AuthMethod: "session", ClientIP: c.ClientIP()})
 		http.SetCookie(c.Writer, manager.Cookie(signedID, expiry))
+		http.SetCookie(c.Writer, manager.ExpiredLegacyCookie())
 		c.Redirect(http.StatusFound, safeNextPath(c.PostForm("next")))
 	})
 
 	protected := router.Group("/")
 	protected.Use(authRequired(manager))
-	protected.GET("/", func(c *gin.Context) { renderDirectory(c, manager, "") })
+	protected.GET("/", func(c *gin.Context) { renderDirectory(c, manager, state, "") })
 	protected.GET("/d/*path", func(c *gin.Context) {
 		raw := pathFromParam(c.Param("path"))
 		if raw == "" {
 			c.Redirect(http.StatusMovedPermanently, appPath("/"))
 			return
 		}
-		renderDirectory(c, manager, raw)
+		renderDirectory(c, manager, state, raw)
 	})
 	protected.GET("/view/*path", func(c *gin.Context) {
 		absolute, rel, _, err := fileForRead(c.Param("path"))
@@ -462,12 +677,12 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		c.Header("X-Content-Type-Options", "nosniff")
 		if !isInlinePreviewable(rel) {
 			c.Header("Content-Type", "application/octet-stream")
-			logAction(c, "查看", rel)
+			_ = logAction(state, c, "file.view", rel)
 			c.FileAttachment(absolute, filepath.Base(rel))
 			return
 		}
 		setSafeFilePreviewHeaders(c)
-		logAction(c, "查看", rel)
+		_ = logAction(state, c, "file.view", rel)
 		c.File(absolute)
 	})
 	protected.GET("/batch-download/:ticket", func(c *gin.Context) {
@@ -483,15 +698,14 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		}
 		selection, err := utils.SelectionFromArchiveItems(items)
 		if err != nil {
-			errorCode := utils.ErrorCode(err)
-			if errorCode == "not_found" || errorCode == "unsupported_file_type" || errorCode == "invalid_path" {
+			if code := utils.ErrorCode(err); code == "not_found" || code == "unsupported_file_type" || code == "invalid_path" {
 				hiddenNotFound(c)
 				return
 			}
 			c.Status(operationStatus(err))
 			return
 		}
-		archive, cleanup, err := utils.PrepareSelectionZip(selection)
+		archive, cleanup, err := utils.PrepareSelectionZip(selection, state.TempDir)
 		if err != nil {
 			c.Status(operationStatus(err))
 			return
@@ -499,11 +713,14 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		defer cleanup()
 		setPrivateResponse(c)
 		c.Header("Content-Type", "application/zip")
-		c.Header("Content-Disposition", "attachment; filename=goFile-selection.zip")
+		c.Header("Content-Disposition", "attachment; filename=fileharbor-selection.zip")
 		c.Header("X-Content-Type-Options", "nosniff")
-		_, _ = io.Copy(c.Writer, archive)
+		if _, err := io.Copy(c.Writer, archive); err != nil {
+			_ = state.Record(AuditEvent{Event: "batch.download", Outcome: "failure", Principal: session.Username, AuthMethod: "session", ClientIP: c.ClientIP(), Affected: len(selection.Items), Code: "io_error"})
+			return
+		}
+		_ = state.Record(AuditEvent{Event: "batch.download", Outcome: "success", Principal: session.Username, AuthMethod: "session", ClientIP: c.ClientIP(), Affected: len(selection.Items)})
 	})
-
 	protected.GET("/download/*path", func(c *gin.Context) {
 		absolute, rel, _, err := fileForRead(c.Param("path"))
 		if err != nil {
@@ -512,21 +729,32 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		}
 		setPrivateResponse(c)
 		c.Header("X-Content-Type-Options", "nosniff")
-		logAction(c, "下载", rel)
+		_ = logAction(state, c, "file.download", rel)
 		c.FileAttachment(absolute, filepath.Base(rel))
 	})
 	protected.GET("/edit/*path", func(c *gin.Context) {
-		absolute, rel, _, err := fileForRead(c.Param("path"))
+		absolute, rel, info, err := fileForRead(c.Param("path"))
 		if err != nil {
 			hiddenNotFound(c)
 			return
 		}
-		data, err := os.ReadFile(absolute)
+		if info.Size() > maxEditorBytes {
+			setPrivateResponse(c)
+			jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
+			return
+		}
+		file, err := os.Open(absolute)
 		if err != nil {
 			hiddenNotFound(c)
 			return
 		}
-		logAction(c, "编辑", rel)
+		data, readErr := io.ReadAll(io.LimitReader(file, maxEditorBytes+1))
+		closeErr := file.Close()
+		if readErr != nil || closeErr != nil || int64(len(data)) > maxEditorBytes {
+			hiddenNotFound(c)
+			return
+		}
+		_ = logAction(state, c, "file.edit", rel)
 		renderHTML(c, "editor.tmpl", gin.H{"data": string(data), "path": rel})
 	})
 	protected.GET("/api/directories", func(c *gin.Context) {
@@ -561,20 +789,32 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "properties": properties})
 	})
+	if uploads == nil || uploads.state != state {
+		store, err := NewUploadStore(state, defaultUploadConfig())
+		if err != nil {
+			panic(err)
+		}
+		uploads = store
+	}
+	registerUploadRoutes(protected, manager, state, uploads)
 
-	// Upload APIs are available in normal mode and in -ru mode.
 	if !reader || uploader {
 		uploadGroup := protected.Group("/")
-		uploadGroup.Use(csrfRequired(manager))
+		uploadGroup.Use(csrfRequired(manager), mutationAuditMiddleware(state))
 		uploadGroup.POST("/do/upload/*path", func(c *gin.Context) {
+			boundedMultipartBody(c)
+			defer cleanupMultipartFiles(c)
 			upload, err := c.FormFile("file")
 			if err != nil {
-				jsonError(c, http.StatusBadRequest, utils.ErrInvalidPath)
+				multipartError(c, err, utils.ErrInvalidPath)
 				return
 			}
 			destination, rel, err := uploadDestination(pathFromParam(c.Param("path")), upload.Filename)
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
+				return
+			}
+			if !requireAudit(c, state, "file.upload", rel, 1) {
 				return
 			}
 			input, err := upload.Open()
@@ -591,14 +831,29 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "上传", rel)
+			if !finishMutation(c, state, "file.upload", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		uploadGroup.POST("/do/chunk/check", func(c *gin.Context) {
-			dir := chunkDir(c.PostForm("fileId"))
+			boundedChunkBody(c)
+			defer cleanupMultipartFiles(c)
+			if err := c.Request.ParseMultipartForm(1 << 20); err != nil {
+				multipartError(c, err, utils.ErrInvalidPath)
+				return
+			}
+			fileID := c.PostForm("fileId")
+			dir := chunkDir(state, fileID)
 			total, err := strconv.Atoi(c.PostForm("totalChunks"))
-			if dir == "" || err != nil || total <= 0 || total > 100000 {
+			if dir == "" || err != nil || total <= 0 || total > maxChunkCount {
 				c.JSON(http.StatusBadRequest, gin.H{"ok": false, "code": "invalid_upload"})
+				return
+			}
+			state.chunkMu.Lock()
+			defer state.chunkMu.Unlock()
+			if _, err := chunkDirSize(dir); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
 				return
 			}
 			uploaded := make([]int, 0)
@@ -610,20 +865,59 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 			c.JSON(http.StatusOK, gin.H{"ok": true, "uploaded": uploaded})
 		})
 		uploadGroup.POST("/do/chunk/upload", func(c *gin.Context) {
-			dir := chunkDir(c.PostForm("fileId"))
+			boundedChunkBody(c)
+			defer cleanupMultipartFiles(c)
+			if err := c.Request.ParseMultipartForm(1 << 20); err != nil {
+				multipartError(c, err, utils.ErrInvalidPath)
+				return
+			}
+			fileID := c.PostForm("fileId")
+			dir := chunkDir(state, fileID)
 			index, err := strconv.Atoi(c.PostForm("chunkIndex"))
 			total, totalErr := strconv.Atoi(c.PostForm("totalChunks"))
-			if dir == "" || err != nil || totalErr != nil || index < 0 || total <= 0 || total > 100000 || index >= total {
+			if dir == "" || err != nil || totalErr != nil || index < 0 || total <= 0 || total > maxChunkCount || index >= total {
 				c.JSON(http.StatusBadRequest, gin.H{"ok": false, "code": "invalid_upload"})
+				return
+			}
+			upload, err := c.FormFile("file")
+			if err != nil {
+				multipartError(c, err, utils.ErrInvalidPath)
+				return
+			}
+			state.chunkMu.Lock()
+			defer state.chunkMu.Unlock()
+			chunkPath := fileID + "/" + strconv.Itoa(index)
+			if !requireAudit(c, state, "file.chunk_upload", chunkPath, 1) {
 				return
 			}
 			if err := os.MkdirAll(dir, 0700); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
 				return
 			}
-			upload, err := c.FormFile("file")
+			size, err := chunkDirSize(dir)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"ok": false, "code": "invalid_upload"})
+				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
+				return
+			}
+			chunkFile := filepath.Join(dir, strconv.Itoa(index))
+			if _, err := os.Lstat(chunkFile); err == nil {
+				c.JSON(http.StatusConflict, gin.H{"ok": false, "code": "chunk_exists"})
+				return
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
+				return
+			}
+			if size > maxChunkStateBytes || upload.Size > maxChunkStateBytes-size {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"ok": false, "code": "upload_too_large"})
+				return
+			}
+			storageSize, err := chunkStorageSize(state.ChunksDir)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
+				return
+			}
+			if storageSize > maxChunkStorageBytes || upload.Size > maxChunkStorageBytes-storageSize {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"ok": false, "code": "upload_too_large"})
 				return
 			}
 			input, err := upload.Open()
@@ -631,21 +925,31 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
 				return
 			}
-			err = writeUploadedFile(filepath.Join(dir, strconv.Itoa(index)), input)
+			err = writeUploadedFile(chunkFile, input)
 			closeErr := input.Close()
 			if err == nil {
 				err = closeErr
 			}
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
+				jsonError(c, operationStatus(err), err)
+				return
+			}
+			if !finishMutation(c, state, "file.chunk_upload", chunkPath, 1) {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 		})
 		uploadGroup.POST("/do/chunk/merge", func(c *gin.Context) {
-			dir := chunkDir(c.PostForm("fileId"))
+			boundedChunkBody(c)
+			defer cleanupMultipartFiles(c)
+			if err := c.Request.ParseMultipartForm(1 << 20); err != nil {
+				multipartError(c, err, utils.ErrInvalidPath)
+				return
+			}
+			fileID := c.PostForm("fileId")
+			dir := chunkDir(state, fileID)
 			total, err := strconv.Atoi(c.PostForm("totalChunks"))
-			if dir == "" || err != nil || total <= 0 || total > 100000 {
+			if dir == "" || err != nil || total <= 0 || total > maxChunkCount {
 				c.JSON(http.StatusBadRequest, gin.H{"ok": false, "code": "invalid_upload"})
 				return
 			}
@@ -654,9 +958,27 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
+			state.chunkMu.Lock()
+			defer state.chunkMu.Unlock()
+			size, err := chunkDirSize(dir)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
+				return
+			}
+			if size > maxChunkStateBytes {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"ok": false, "code": "upload_too_large"})
+				return
+			}
+			if !requireAudit(c, state, "file.upload", rel, 1) {
+				return
+			}
 			output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 			if err != nil {
-				jsonError(c, operationStatus(err), utils.ErrDestinationExists)
+				if errors.Is(err, fs.ErrExist) {
+					jsonError(c, http.StatusConflict, utils.ErrDestinationExists)
+				} else {
+					jsonError(c, http.StatusInternalServerError, errors.New("io"))
+				}
 				return
 			}
 			success := true
@@ -674,24 +996,37 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				}
 			}
 			closeErr := output.Close()
-			_ = os.RemoveAll(dir)
 			if !success || closeErr != nil {
 				_ = os.Remove(destination)
 				jsonError(c, http.StatusInternalServerError, errors.New("io"))
 				return
 			}
-			logAction(c, "上传", rel)
+			if err := os.RemoveAll(dir); err != nil {
+				if !finishMutation(c, state, "file.upload", rel, 1) {
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
+				return
+			}
+			if !finishMutation(c, state, "file.upload", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		uploadGroup.POST("/api/upload", func(c *gin.Context) {
+			boundedMultipartBody(c)
+			defer cleanupMultipartFiles(c)
 			upload, err := c.FormFile("file")
 			if err != nil {
-				jsonError(c, http.StatusBadRequest, utils.ErrInvalidPath)
+				multipartError(c, err, utils.ErrInvalidPath)
 				return
 			}
 			destination, rel, err := uploadDestination(c.PostForm("path"), upload.Filename)
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
+				return
+			}
+			if !requireAudit(c, state, "file.upload", rel, 1) {
 				return
 			}
 			input, err := upload.Open()
@@ -708,61 +1043,90 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "上传", rel)
+			if !finishMutation(c, state, "file.upload", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 	}
 
-	// Mutating file management routes do not exist in -r or -ru mode.
 	if !reader {
 		mutations := protected.Group("/")
-		mutations.Use(csrfRequired(manager))
+		mutations.Use(boundedFormBody(maxEditorBytes+64<<10), csrfRequired(manager), mutationAuditMiddleware(state))
 		mutations.POST("/do/newdir", func(c *gin.Context) {
+			if !requireAudit(c, state, "directory.create", "", 1) {
+				return
+			}
 			rel, err := utils.MakeDirectory(c.PostForm("path"), c.PostForm("dirname"))
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "新建", rel+"/")
+			if !finishMutation(c, state, "directory.create", rel+"/", 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		mutations.POST("/do/newfile", func(c *gin.Context) {
+			if !requireAudit(c, state, "file.create", "", 1) {
+				return
+			}
 			rel, err := utils.MakeFile(c.PostForm("path"), c.PostForm("filename"))
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "新建", rel)
+			if !finishMutation(c, state, "file.create", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		mutations.POST("/do/rename", func(c *gin.Context) {
+			if !requireAudit(c, state, "file.rename", "", 1) {
+				return
+			}
 			rel, err := utils.RenameItem(c.PostForm("path"), c.PostForm("name"))
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "重命名", rel)
+			if !finishMutation(c, state, "file.rename", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		mutations.POST("/do/move", func(c *gin.Context) {
+			if !requireAudit(c, state, "file.move", "", 1) {
+				return
+			}
 			rel, err := utils.MoveItem(c.PostForm("path"), c.PostForm("destination"), c.PostForm("name"))
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "移动", rel)
+			if !finishMutation(c, state, "file.move", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		mutations.POST("/do/copy", func(c *gin.Context) {
+			if !requireAudit(c, state, "file.copy", "", 1) {
+				return
+			}
 			rel, err := utils.CopyItem(c.PostForm("path"), c.PostForm("destination"), c.PostForm("name"))
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "复制", rel)
+			if !finishMutation(c, state, "file.copy", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		mutations.POST("/do/rm", func(c *gin.Context) {
+			if !requireAudit(c, state, "file.delete", "", 1) {
+				return
+			}
 			absolute, rel, info, err := utils.ResolveExisting(c.PostForm("path"), false)
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
@@ -781,41 +1145,72 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				jsonError(c, http.StatusInternalServerError, errors.New("io"))
 				return
 			}
-			logAction(c, "删除", rel)
+			if !finishMutation(c, state, "file.delete", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 		})
 		mutations.POST("/do/zip", func(c *gin.Context) {
+			if !requireAudit(c, state, "archive.create", "", 1) {
+				return
+			}
 			rel, err := utils.CreateDirectoryZip(c.PostForm("path"))
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "压缩", rel)
+			if !finishMutation(c, state, "archive.create", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		mutations.POST("/do/unzip", func(c *gin.Context) {
+			if !requireAudit(c, state, "archive.extract", "", 1) {
+				return
+			}
 			rel, err := utils.ExtractArchive(c.PostForm("path"))
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "解压", rel)
+			if !finishMutation(c, state, "archive.extract", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 		})
 		mutations.POST("/do/save", func(c *gin.Context) {
-			absolute, rel, _, err := fileForRead(c.PostForm("path"))
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxEditorBytes+64<<10)
+			if err := c.Request.ParseForm(); err != nil {
+				multipartError(c, err, utils.ErrInvalidPath)
+				return
+			}
+			path := c.Request.PostForm.Get("path")
+			data := c.Request.PostForm.Get("data")
+			if int64(len(data)) > maxEditorBytes {
+				jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
+				return
+			}
+			absolute, rel, _, err := fileForRead(path)
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			if err := os.WriteFile(absolute, []byte(c.PostForm("data")), 0644); err != nil {
+			if !requireAudit(c, state, "file.save", rel, 1) {
+				return
+			}
+			if err := os.WriteFile(absolute, []byte(data), 0644); err != nil {
 				jsonError(c, http.StatusInternalServerError, errors.New("io"))
 				return
 			}
-			logAction(c, "保存", rel)
+			if !finishMutation(c, state, "file.save", rel, 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 		})
 		mutations.POST("/do/md5", func(c *gin.Context) {
+			if !requireAudit(c, state, "file.checksum", "", 1) {
+				return
+			}
 			absolute, rel, _, err := fileForRead(c.PostForm("path"))
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
@@ -851,7 +1246,9 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				jsonError(c, http.StatusInternalServerError, errors.New("io"))
 				return
 			}
-			logAction(c, "新建", rel+".md5")
+			if !finishMutation(c, state, "file.checksum", rel+".md5", 1) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "hash": value})
 		})
 		mutations.POST("/do/batch/move", func(c *gin.Context) {
@@ -863,12 +1260,17 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
+			if !requireAudit(c, state, "batch.move", "", len(selection.Items)) {
+				return
+			}
 			paths, err := utils.BatchMove(selection, request.Destination)
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "批量移动", fmt.Sprintf("%d 项", len(paths)))
+			if !finishMutation(c, state, "batch.move", "", len(paths)) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "affected": len(paths), "paths": paths})
 		})
 		mutations.POST("/do/batch/copy", func(c *gin.Context) {
@@ -880,12 +1282,17 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
+			if !requireAudit(c, state, "batch.copy", "", len(selection.Items)) {
+				return
+			}
 			paths, err := utils.BatchCopy(selection, request.Destination)
 			if err != nil {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			logAction(c, "批量复制", fmt.Sprintf("%d 项", len(paths)))
+			if !finishMutation(c, state, "batch.copy", "", len(paths)) {
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "affected": len(paths), "paths": paths})
 		})
 		mutations.POST("/do/batch/delete", func(c *gin.Context) {
@@ -894,23 +1301,35 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
+			if !requireAudit(c, state, "batch.delete", "", len(selection.Items)) {
+				return
+			}
 			results := utils.BatchDelete(selection)
 			allDeleted := true
+			deleted := 0
 			for _, result := range results {
 				if result.Code != "deleted" {
 					allDeleted = false
+				} else {
+					deleted++
 				}
 			}
-			logAction(c, "批量删除", fmt.Sprintf("%d 项", len(results)))
 			if !allDeleted {
+				if err := recordAction(state, c, "batch.delete", "partial_failure", "", "delete_partial", deleted); err != nil {
+					setPrivateResponse(c)
+					c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "audit_unavailable"})
+					return
+				}
 				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "delete_partial", "items": results})
+				return
+			}
+			if !finishMutation(c, state, "batch.delete", "", len(results)) {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "affected": len(results), "items": results})
 		})
 	}
 
-	// A read-only batch ZIP is permitted in all authenticated modes.
 	batchArchive := protected.Group("/")
 	batchArchive.Use(csrfRequired(manager))
 	batchArchive.POST("/do/batch/download-zip", func(c *gin.Context) {
@@ -934,58 +1353,128 @@ func newRouter(manager *auth.Manager) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "download_url": appPath("/batch-download/" + ticket)})
 	})
-	// Logout is intentionally present in all modes.
 	logout := protected.Group("/")
 	logout.Use(csrfRequired(manager))
 	logout.POST("/logout", func(c *gin.Context) {
-		manager.Logout(authInfo(c))
+		info := authInfo(c)
+		manager.Logout(info)
+		_ = state.Record(AuditEvent{Event: "auth.logout", Outcome: "success", Principal: info.Username, AuthMethod: "session", ClientIP: c.ClientIP()})
 		http.SetCookie(c.Writer, manager.ExpiredCookie())
+		http.SetCookie(c.Writer, manager.ExpiredLegacyCookie())
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
 	return router
 }
 
-func web(manager *auth.Manager) error {
-	address := net.JoinHostPort(conf.Host, conf.GoFilePort)
+func web(ctx context.Context, manager *auth.Manager, state *RuntimeState) error {
+	address := net.JoinHostPort(conf.Host, conf.FileHarborPort)
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
 	fmt.Println(strings.Repeat("-", 44))
-	fmt.Println("Directory : " + conf.GoFile)
+	fmt.Println("Directory : " + conf.FileHarbor)
 	fmt.Println("Listen    : http://" + address + appPath("/"))
 	if !isLoopbackHost(conf.Host) {
 		for _, ip := range localIPs() {
-			fmt.Println("Access    : http://" + net.JoinHostPort(ip, conf.GoFilePort) + appPath("/"))
+			fmt.Println("Access    : http://" + net.JoinHostPort(ip, conf.FileHarborPort) + appPath("/"))
 		}
 	}
 	fmt.Println(strings.Repeat("-", 44))
-	return http.ListenAndServe(address, withBasePath(newRouter(manager)))
+
+	gate := newRequestGate()
+	server := &http.Server{
+		Handler:           gate.Wrap(withBasePath(newRouter(manager, state))),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	state.SetReady(true)
+	if uploads != nil && uploads.state == state {
+		uploads.StartReaper(ctx.Done())
+	}
+	if err := state.Record(AuditEvent{Event: "server.start", Outcome: "success"}); err != nil {
+		state.SetReady(false)
+		return err
+	}
+
+	serveErrors := make(chan error, 1)
+	go func() { serveErrors <- server.Serve(listener) }()
+
+	select {
+	case err := <-serveErrors:
+		state.SetReady(false)
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		state.SetReady(false)
+		gate.StopAdmission()
+		_ = state.Record(AuditEvent{Event: "server.shutdown_requested", Outcome: "success"})
+		deadline := time.Now().Add(shutdownTimeout())
+		shutdownCtx, cancel := context.WithDeadline(context.Background(), deadline)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			_ = server.Close()
+		}
+		if err := <-serveErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		if !gate.WaitForDrain(deadline) {
+			// Admitted handlers can still be using private runtime files. Exit without
+			// releasing the lock or deleting state under their feet; process exit
+			// closes descriptors after this function returns.
+			return errForcedShutdown
+		}
+		_ = state.Record(AuditEvent{Event: "server.shutdown_complete", Outcome: "success"})
+		return nil
+	}
 }
 
 func isLoopbackHost(host string) bool {
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
-func parseConfig() (*auth.Manager, error) {
+func parseConfig() (*auth.Manager, *RuntimeState, error) {
 	startup, err := parseStartupConfig(os.Args[1:], os.Getenv, os.Stderr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
 	absolute, err := filepath.Abs(startup.Path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	conf.GoFile = filepath.Clean(absolute)
-	conf.GoFilePort = startup.Port
+	conf.FileHarbor = filepath.Clean(absolute)
+	conf.FileHarborPort = startup.Port
 	conf.Host = startup.Host
 	reader = startup.ReadOnly
 	uploader = startup.UploadReadOnly
-	cookieSecure = startup.CookieSecure
-	allowInsecureLAN = startup.AllowInsecureLAN
 	basePath = startup.BasePath
-	if _, err := utils.Root(); err != nil {
-		return nil, fmt.Errorf("invalid -path: %w", err)
+	root, err := utils.Root()
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid -path: %w", err)
 	}
-	return auth.NewManager(startup.Auth)
+	manager, err := auth.NewManager(startup.Auth)
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err := OpenRuntimeState(startup.StateDir, root)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid runtime state: %w", err)
+	}
+	store, err := NewUploadStore(state, startup.Upload)
+	if err != nil {
+		_ = state.Close()
+		return nil, nil, fmt.Errorf("invalid upload state: %w", err)
+	}
+	uploads = store
+	return manager, state, nil
 }
 
 func localIPs() []string {
@@ -1018,24 +1507,50 @@ func localIPs() []string {
 	return ips
 }
 
-func main() {
+func run() int {
 	if len(os.Args) > 1 && os.Args[1] == "hash-password" {
 		if err := runHashPasswordCommand(os.Args[2:], terminalPasswordPrompter{file: os.Stdin}, os.Stdout, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
+			return 2
 		}
-		return
+		return 0
 	}
 
-	manager, err := parseConfig()
+	manager, state, err := parseConfig()
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return
+			return 0
 		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		return 2
 	}
-	if err := web(manager); err != nil {
+	closeState := true
+	defer func() {
+		if !closeState {
+			return
+		}
+		if err := state.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	defer stop()
+	if err := web(ctx, manager, state); err != nil {
+		if errors.Is(err, errForcedShutdown) {
+			closeState = false
+			return 0
+		}
 		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
+	return 0
+}
+
+func main() {
+	os.Exit(run())
 }

@@ -4,7 +4,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"goFile/auth"
+	"github.com/irains/fileharbor/auth"
 	"io"
 	"os"
 

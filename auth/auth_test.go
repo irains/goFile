@@ -28,6 +28,37 @@ func testConfig(t *testing.T) Config {
 	}
 }
 
+func TestConfigFromLookupUsesOneNamespace(t *testing.T) {
+	primary := map[string]string{
+		"FILEHARBOR_ADMIN_USERNAME":      "admin",
+		"FILEHARBOR_ADMIN_PASSWORD_HASH": testConfig(t).PasswordHash,
+		"FILEHARBOR_SESSION_SECRET":      "0123456789abcdef0123456789abcdef",
+		"FILEHARBOR_API_TOKEN":           "abcdef0123456789abcdef0123456789",
+	}
+	lookup := func(values map[string]string) func(string) string {
+		return func(key string) string { return values[key] }
+	}
+	config, err := ConfigFromLookup(lookup(primary), true)
+	if err != nil || config.Username != "admin" || !config.CookieSecure {
+		t.Fatalf("primary configuration = %#v, %v", config, err)
+	}
+
+	legacy := make(map[string]string, len(primary))
+	for key, value := range primary {
+		legacy["GOFILE_"+strings.TrimPrefix(key, "FILEHARBOR_")] = value
+	}
+	config, err = ConfigFromLookup(lookup(legacy), false)
+	if err != nil || config.Username != "admin" || config.CookieSecure {
+		t.Fatalf("legacy configuration = %#v, %v", config, err)
+	}
+	for key, value := range primary {
+		legacy[key] = value
+	}
+	if _, err := ConfigFromLookup(lookup(legacy), false); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("mixed namespaces error = %v", err)
+	}
+}
+
 func TestGeneratePasswordHash(t *testing.T) {
 	first, err := GeneratePasswordHash([]byte(testPassword))
 	if err != nil {
@@ -108,19 +139,23 @@ func TestSessionCookiesUseConfiguredPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookie := manager.Cookie("signed", time.Now().Add(time.Hour))
-	if cookie.Path != "/gofile" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+	if cookie.Name != CookieName || cookie.Path != "/gofile" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatalf("session cookie = %#v", cookie)
 	}
 	expired := manager.ExpiredCookie()
-	if expired.Path != "/gofile" || expired.MaxAge != -1 || !expired.Secure || !expired.HttpOnly || expired.SameSite != http.SameSiteStrictMode {
+	if expired.Name != CookieName || expired.Path != "/gofile" || expired.MaxAge != -1 || !expired.Secure || !expired.HttpOnly || expired.SameSite != http.SameSiteStrictMode {
 		t.Fatalf("expired cookie = %#v", expired)
+	}
+	legacy := manager.ExpiredLegacyCookie()
+	if legacy.Name != LegacyCookieName || legacy.Path != "/gofile" || legacy.MaxAge != -1 || !legacy.Secure || !legacy.HttpOnly || legacy.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("expired legacy cookie = %#v", legacy)
 	}
 
 	rootManager, err := NewManager(testConfig(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rootManager.Cookie("signed", time.Now()).Path != "/" || rootManager.ExpiredCookie().Path != "/" {
+	if rootManager.Cookie("signed", time.Now()).Path != "/" || rootManager.ExpiredCookie().Path != "/" || rootManager.ExpiredLegacyCookie().Path != "/" {
 		t.Fatal("empty cookie path should default to root")
 	}
 }

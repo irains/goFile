@@ -41,7 +41,7 @@ func CreateDirectoryZip(rawPath string) (string, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", operationError("io_error")
 	}
-	temp, err := os.CreateTemp(filepath.Dir(dir), ".gofile-zip-*")
+	temp, err := os.CreateTemp(filepath.Dir(dir), ".fileharbor-zip-*")
 	if err != nil {
 		return "", operationError("io_error")
 	}
@@ -115,14 +115,14 @@ func preflightZipItem(absolute string, info os.FileInfo, state *archiveState) er
 	return nil
 }
 
-// PrepareSelectionZip fully builds a batch download in the operating system's
+// PrepareSelectionZip fully builds a batch download in the supplied private
 // temporary directory before an HTTP handler writes success headers. The caller
 // owns the returned file and must invoke cleanup after it finishes streaming.
-func PrepareSelectionZip(selection Selection) (*os.File, func(), error) {
+func PrepareSelectionZip(selection Selection, tempDir string) (*os.File, func(), error) {
 	if err := PreflightSelectionZip(selection); err != nil {
 		return nil, nil, err
 	}
-	file, err := os.CreateTemp("", "gofile-selection-*.zip")
+	file, err := os.CreateTemp(tempDir, "fileharbor-selection-*.zip")
 	if err != nil {
 		return nil, nil, operationError("io_error")
 	}
@@ -358,7 +358,7 @@ func preflightExtractionTargets(outputDir string, names []string) ([]string, err
 }
 
 func newExtractionStage(outputDir string) (string, error) {
-	stage, err := os.MkdirTemp(outputDir, ".gofile-extract-")
+	stage, err := os.MkdirTemp(outputDir, ".fileharbor-extract-")
 	if err != nil {
 		return "", operationError("io_error")
 	}

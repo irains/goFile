@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"goFile/conf"
+	"github.com/irains/fileharbor/conf"
 )
 
 type directoryBrowserResponse struct {
-	OK   bool `json:"ok"`
+	OK   bool   `json:"ok"`
 	Path string `json:"path"`
 	Dirs []struct {
 		Name string `json:"name"`
@@ -38,20 +38,22 @@ func requestDirectoryBrowser(t *testing.T, router http.Handler, cookie *http.Coo
 }
 
 func TestDirectoryBrowserAPI(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.GoFile, reader, uploader, basePath, templateSets
-	conf.GoFile, reader, uploader, basePath = t.TempDir(), false, false, ""
-	t.Cleanup(func() { conf.GoFile, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates })
+	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+	})
 
 	for _, dir := range []string{"alpha", "empty", filepath.Join("alpha", "nested")} {
-		if err := os.MkdirAll(filepath.Join(conf.GoFile, dir), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(conf.FileHarbor, dir), 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(conf.GoFile, "visible.txt"), []byte("file"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(conf.FileHarbor, "visible.txt"), []byte("file"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	router := newRouter(testManager(t))
+	router := newTestRouter(t, testManager(t))
 	response := requestDirectoryBrowser(t, router, nil, "/api/directories")
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous directory browser status = %d", response.Code)
@@ -108,14 +110,16 @@ func TestDirectoryBrowserAPI(t *testing.T) {
 }
 
 func TestDirectoryBrowserRemainsAvailableReadOnlyAndMounted(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.GoFile, reader, uploader, basePath, templateSets
-	conf.GoFile, reader, uploader, basePath = t.TempDir(), true, false, "/gofile"
-	t.Cleanup(func() { conf.GoFile, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates })
-	if err := os.Mkdir(filepath.Join(conf.GoFile, "reports"), 0755); err != nil {
+	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), true, false, "/gofile"
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+	})
+	if err := os.Mkdir(filepath.Join(conf.FileHarbor, "reports"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	router := withBasePath(newRouter(testManager(t)))
+	router := withBasePath(newTestRouter(t, testManager(t)))
 	cookie := loginCookie(t, router)
 	response := requestDirectoryBrowser(t, router, cookie, "/gofile/api/directories")
 	if response.Code != http.StatusOK {
@@ -131,17 +135,19 @@ func TestDirectoryBrowserRemainsAvailableReadOnlyAndMounted(t *testing.T) {
 }
 
 func TestDirectoryRowsExposeRefreshAndSafeParentNavigation(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.GoFile, reader, uploader, basePath, templateSets
-	conf.GoFile, reader, uploader, basePath = t.TempDir(), false, false, ""
-	t.Cleanup(func() { conf.GoFile, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates })
-	if err := os.MkdirAll(filepath.Join(conf.GoFile, "nested", "empty"), 0755); err != nil {
+	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+	})
+	if err := os.MkdirAll(filepath.Join(conf.FileHarbor, "nested", "empty"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(conf.GoFile, "nested", "document.txt"), []byte("file"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(conf.FileHarbor, "nested", "document.txt"), []byte("file"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	router := newRouter(testManager(t))
+	router := newTestRouter(t, testManager(t))
 	cookie := loginCookie(t, router)
 	response := requestDirectoryBrowser(t, router, cookie, "/d/nested")
 	if response.Code != http.StatusOK {
@@ -175,12 +181,63 @@ func TestDirectoryRowsExposeRefreshAndSafeParentNavigation(t *testing.T) {
 	}
 }
 
-func TestRootEmptyListingRemainsAnEmptyState(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.GoFile, reader, uploader, basePath, templateSets
-	conf.GoFile, reader, uploader, basePath = t.TempDir(), false, false, ""
-	t.Cleanup(func() { conf.GoFile, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates })
+func TestReliableUploadQueueRendersAcrossUploadModes(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads := conf.FileHarbor, reader, uploader, basePath, templateSets, uploads
+	conf.FileHarbor, reader, uploader, basePath, uploads = t.TempDir(), false, false, "/fileharbor", nil
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath, templateSets, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads
+	})
 
-	router := newRouter(testManager(t))
+	renderPage := func(t *testing.T, writable, uploadOnly bool) string {
+		t.Helper()
+		reader, uploader, uploads = !writable, uploadOnly, nil
+		handler := withBasePath(newTestRouter(t, testManager(t)))
+		cookie := loginCookie(t, handler)
+		response := requestDirectoryBrowser(t, handler, cookie, "/fileharbor/")
+		if response.Code != http.StatusOK {
+			t.Fatalf("listing status = %d: %s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+
+	for _, mode := range []struct {
+		name       string
+		writable   bool
+		uploadOnly bool
+		visible    bool
+	}{
+		{name: "normal", writable: true, visible: true},
+		{name: "upload-only", uploadOnly: true, visible: true},
+		{name: "strict-read-only", visible: false},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			page := renderPage(t, mode.writable, mode.uploadOnly)
+			if mode.visible {
+				for _, want := range []string{"id=\"fileInput\" multiple", "id=\"uploadQueue\" role=\"list\"", "appURL('/api/uploads", "XMLHttpRequest", "indexedDB.open"} {
+					if !strings.Contains(page, want) {
+						t.Fatalf("reliable upload page missing %q", want)
+					}
+				}
+				for _, forbidden := range []string{"id=\"uploadProgress\"", "id=\"uploadProgressBar\"", "'/do/upload/'", "new FormData()"} {
+					if strings.Contains(page, forbidden) {
+						t.Fatalf("reliable upload page retained legacy %q", forbidden)
+					}
+				}
+			} else if strings.Contains(page, "id=\"fileInput\"") || strings.Contains(page, "id=\"uploadQueue\"") {
+				t.Fatal("strict read-only page rendered upload queue")
+			}
+		})
+	}
+}
+
+func TestRootEmptyListingRemainsAnEmptyState(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+	})
+
+	router := newTestRouter(t, testManager(t))
 	cookie := loginCookie(t, router)
 	response := requestDirectoryBrowser(t, router, cookie, "/")
 	if response.Code != http.StatusOK {

@@ -235,7 +235,7 @@ func MoveItem(rawPath, destination, optionalName string) (string, error) {
 	} else if !isCrossDeviceError(err) {
 		return "", operationError("io_error")
 	}
-	stage, err := os.MkdirTemp(destAbs, ".gofile-move-")
+	stage, err := os.MkdirTemp(destAbs, ".fileharbor-move-")
 	if err != nil {
 		return "", operationError("io_error")
 	}
@@ -341,7 +341,7 @@ func BatchCopy(selection Selection, destination string) ([]string, error) {
 		}
 	}
 	for i, item := range selection.Items {
-		stage := targets[i] + ".gofile-copy-staging"
+		stage := targets[i] + ".fileharbor-copy-staging"
 		if _, err := os.Lstat(stage); err == nil {
 			cleanupStaged()
 			return nil, operationError("destination_busy")

@@ -35,7 +35,7 @@ type Dir struct {
 }
 
 var (
-	GoFilePort string
-	GoFile     string
-	Host       string
+	FileHarborPort string
+	FileHarbor     string
+	Host           string
 )

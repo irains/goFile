@@ -7,7 +7,8 @@
 .env
 .env.*
 *.env
-!gofile.env.example
+!fileharbor.env.example
+fileharbor.env
 gofile.env
 *.pem
 *.key
@@ -17,6 +18,8 @@ gofile.env
 *.pfx
 
 # Local binaries and build output
+fileharbor
+fileharbor.exe
 goFile
 goFile.exe
 main

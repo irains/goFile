@@ -10,11 +10,11 @@ import (
 )
 
 type testPasswordPrompter struct {
-	terminal    bool
-	values      [][]byte
-	errors      []error
-	err         error
-	reads       int
+	terminal bool
+	values   [][]byte
+	errors   []error
+	err      error
+	reads    int
 }
 
 func (p *testPasswordPrompter) IsTerminal() bool { return p.terminal }

@@ -17,15 +17,34 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-files '*.go' | xargs -r gofmt -l)"
       - name: Vet
         run: go vet ./...
       - name: Test
         run: go test ./...
+      - name: Race test
+        if: runner.os == 'Linux'
+        run: go test -race ./...
       - name: Build
         run: go build ./...
+      - name: Build release targets
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in \
+            linux/amd64 linux/arm64 linux/386 \
+            darwin/amd64 darwin/arm64 \
+            windows/amd64 windows/386; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build -o /dev/null .
+          done
       - name: Build Docker image
         if: runner.os == 'Linux'
-        run: docker build --tag gofile:ci .
+        run: docker build --tag fileharbor:ci .
       - name: Smoke-test Docker image
         if: runner.os == 'Linux'
-        run: docker run --rm gofile:ci -h
+        run: docker run --rm fileharbor:ci -h

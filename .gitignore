@@ -1,10 +1,15 @@
 test.go
 test.jpg
 main
+fileharbor
+fileharbor.exe
+goFile
+goFile.exe
 CLAUDE.md
 .claude/
 .env
 .env.*
+fileharbor.env
 gofile.env
 !.env.example
-!gofile.env.example
+!fileharbor.env.example

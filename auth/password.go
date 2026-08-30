@@ -14,8 +14,8 @@ const (
 )
 
 var (
-	ErrInvalidPassword  = errors.New("invalid password")
-	ErrPasswordTooLong  = errors.New("password exceeds bcrypt byte limit")
+	ErrInvalidPassword = errors.New("invalid password")
+	ErrPasswordTooLong = errors.New("password exceeds bcrypt byte limit")
 )
 
 // ValidatePassword enforces the plaintext password constraints shared by the

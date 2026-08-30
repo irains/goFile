@@ -1,4 +1,4 @@
-// Package auth provides the small, server-side authentication primitives used by goFile.
+// Package auth provides the small, server-side authentication primitives used by FileHarbor.
 package auth
 
 import (
@@ -18,15 +18,16 @@ import (
 )
 
 const (
-	CookieName      = "gofile_session"
-	SessionDuration = 12 * time.Hour
-	TicketDuration  = time.Minute
-	ListingDuration = 5 * time.Minute
+	CookieName       = "fileharbor_session"
+	LegacyCookieName = "gofile_session"
+	SessionDuration  = 12 * time.Hour
+	TicketDuration   = time.Minute
+	ListingDuration  = 5 * time.Minute
 
-	maxLoginFailures             = 5
-	loginCooldown                = time.Minute
-	maxTrackedLoginIPs           = 4096
-	maxConcurrentPasswordChecks  = 4
+	maxLoginFailures            = 5
+	loginCooldown               = time.Minute
+	maxTrackedLoginIPs          = 4096
+	maxConcurrentPasswordChecks = 4
 )
 
 var (
@@ -45,25 +46,61 @@ type Config struct {
 	CookiePath    string
 }
 
-// ConfigFromLookup loads configuration without validating it. Callers that merge
-// multiple configuration sources can apply their precedence rules before using
-// Config.Validate.
-func ConfigFromLookup(lookup func(string) string, cookieSecure bool) Config {
+// ConfigFromLookup loads FileHarbor configuration without validating it. A
+// deployment must use either the FILEHARBOR_* namespace or the temporary
+// GOFILE_* compatibility namespace, never both. Refusing partial mixed sets
+// prevents credentials from being silently assembled from two deployments.
+func ConfigFromLookup(lookup func(string) string, cookieSecure bool) (Config, error) {
 	if lookup == nil {
 		lookup = func(string) string { return "" }
 	}
-	return Config{
-		Username:      lookup("GOFILE_ADMIN_USERNAME"),
-		PasswordHash:  lookup("GOFILE_ADMIN_PASSWORD_HASH"),
-		SessionSecret: lookup("GOFILE_SESSION_SECRET"),
-		APIToken:      lookup("GOFILE_API_TOKEN"),
-		CookieSecure:  cookieSecure,
+
+	primaryKeys := []string{
+		"FILEHARBOR_ADMIN_USERNAME",
+		"FILEHARBOR_ADMIN_PASSWORD_HASH",
+		"FILEHARBOR_SESSION_SECRET",
+		"FILEHARBOR_API_TOKEN",
 	}
+	legacyKeys := []string{
+		"GOFILE_ADMIN_USERNAME",
+		"GOFILE_ADMIN_PASSWORD_HASH",
+		"GOFILE_SESSION_SECRET",
+		"GOFILE_API_TOKEN",
+	}
+	primaryConfigured := anyConfigured(lookup, primaryKeys)
+	legacyConfigured := anyConfigured(lookup, legacyKeys)
+	if primaryConfigured && legacyConfigured {
+		return Config{}, ErrInvalidConfig
+	}
+
+	keys := primaryKeys
+	if legacyConfigured {
+		keys = legacyKeys
+	}
+	return Config{
+		Username:      lookup(keys[0]),
+		PasswordHash:  lookup(keys[1]),
+		SessionSecret: lookup(keys[2]),
+		APIToken:      lookup(keys[3]),
+		CookieSecure:  cookieSecure,
+	}, nil
+}
+
+func anyConfigured(lookup func(string) string, keys []string) bool {
+	for _, key := range keys {
+		if lookup(key) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ConfigFromEnv loads and validates the mandatory single-administrator credentials.
 func ConfigFromEnv(cookieSecure bool) (Config, error) {
-	cfg := ConfigFromLookup(os.Getenv, cookieSecure)
+	cfg, err := ConfigFromLookup(os.Getenv, cookieSecure)
+	if err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -119,7 +156,7 @@ type archiveTicket struct {
 }
 
 // Manager keeps short-lived sessions and browser-only operation tickets in memory.
-// Restarting goFile deliberately invalidates all of them.
+// Restarting FileHarbor deliberately invalidates all of them.
 type Manager struct {
 	config          Config
 	now             func() time.Time
@@ -299,16 +336,21 @@ func (m *Manager) Logout(info Info) {
 }
 
 func (m *Manager) Cookie(value string, expires time.Time) *http.Cookie {
-	return m.sessionCookie(value, expires, int(SessionDuration.Seconds()))
+	return m.sessionCookie(CookieName, value, expires, int(SessionDuration.Seconds()))
 }
 
 func (m *Manager) ExpiredCookie() *http.Cookie {
-	return m.sessionCookie("", time.Time{}, -1)
+	return m.sessionCookie(CookieName, "", time.Time{}, -1)
 }
 
-func (m *Manager) sessionCookie(value string, expires time.Time, maxAge int) *http.Cookie {
+// ExpiredLegacyCookie clears the prior goFile session cookie during migration.
+func (m *Manager) ExpiredLegacyCookie() *http.Cookie {
+	return m.sessionCookie(LegacyCookieName, "", time.Time{}, -1)
+}
+
+func (m *Manager) sessionCookie(name, value string, expires time.Time, maxAge int) *http.Cookie {
 	return &http.Cookie{
-		Name:     CookieName,
+		Name:     name,
 		Value:    value,
 		Path:     m.config.CookiePath,
 		Expires:  expires,

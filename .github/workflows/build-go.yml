@@ -1,4 +1,4 @@
-name: Release Go
+name: Release FileHarbor
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 jobs:
-  build-go-binary:
+  build-fileharbor-binary:
     name: ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.19.13"
+          go-version: "1.27.0"
           cache: true
       - name: Build release archive
         shell: bash
@@ -40,13 +40,13 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
-          asset_name="goFile-${GOOS}-${GOARCH}"
+          asset_name="fileharbor-${GOOS}-${GOARCH}"
           mkdir -p dist
 
           if [ "$GOOS" = "windows" ]; then
-            binary="goFile.exe"
+            binary="fileharbor.exe"
           else
-            binary="goFile"
+            binary="fileharbor"
           fi
 
           CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "dist/${binary}" .
@@ -64,6 +64,13 @@ jobs:
 
           rm "dist/${binary}"
           sha256sum "dist/${archive}" > "dist/${archive}.sha256"
+      - name: Publish installer
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$RELEASE_TAG" fileharbor.sh --clobber
       - name: Upload release assets
         shell: bash
         env:
