@@ -1,10 +1,21 @@
-FROM golang:1.27.0-alpine3.22 AS builder
+FROM node:24-alpine3.23 AS web-builder
+WORKDIR /src/web
+
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ ./
+RUN npm run build
+
+FROM golang:1.27.0-alpine3.23 AS builder
 WORKDIR /src
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+RUN rm -rf assets/web
+COPY --from=web-builder /src/assets/web ./assets/web
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fileharbor .
 
 FROM alpine:3.22
@@ -19,7 +30,7 @@ RUN addgroup -S -g "${FILEHARBOR_GID}" fileharbor \
 COPY --from=builder /out/fileharbor /app/fileharbor
 RUN chmod 0555 /app/fileharbor
 
-# Templates are embedded in the binary. /data and /state are persistent writable paths.
+# Templates and built frontend assets are embedded in the binary. /data and /state are persistent writable paths.
 WORKDIR /data
 USER fileharbor:fileharbor
 VOLUME ["/data", "/state"]

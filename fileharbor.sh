@@ -6,7 +6,7 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 1
 fi
 
-repo='irains/fileharbor'
+repo='irains/goFile'
 version='latest'
 
 usage() {

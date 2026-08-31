@@ -272,6 +272,7 @@ func ListDirectory(raw string) (conf.Info, error) {
 		return conf.Info{}, err
 	}
 	info := conf.Info{}
+	truncated := false
 	for _, entry := range entries {
 		name := entry.Name()
 		if ValidateLeafName(name) != nil {
@@ -310,6 +311,7 @@ func ListDirectory(raw string) (conf.Info, error) {
 		return strings.ToLower(info.Entries[i].Name) < strings.ToLower(info.Entries[j].Name)
 	})
 	if len(info.Entries) > MaxListEntries {
+		truncated = true
 		info.Entries = info.Entries[:MaxListEntries]
 		info.Files = info.Files[:0]
 		info.Dirs = info.Dirs[:0]
@@ -321,6 +323,7 @@ func ListDirectory(raw string) (conf.Info, error) {
 			}
 		}
 	}
+	info.Truncated = truncated
 	return info, nil
 }
 

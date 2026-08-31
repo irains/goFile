@@ -28,6 +28,12 @@ dist/
 coverage/
 *.coverprofile
 
+# Frontend dependencies are restored in the Node build stage.
+web/node_modules/
+web/dist/
+web/.vite/
+web/coverage/
+
 # Local test fixtures and temporary output
 test.go
 test.jpg

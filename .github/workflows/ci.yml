@@ -1,12 +1,51 @@
-# Go source verification for every pull request and supported native target.
-name: Verify Go
+# Go and React/Vite verification for every pull request and supported native target.
+name: Verify FileHarbor
 
 on:
   push:
+    branches: ["**"]
   pull_request:
 
 jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+      - name: Test
+        working-directory: web
+        run: npm test
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+      - name: Type check
+        working-directory: web
+        run: npm run typecheck
+      - name: Remove generated frontend output
+        shell: bash
+        run: rm -rf assets/web
+      - name: Build
+        working-directory: web
+        run: npm run build
+      - name: Check generated frontend output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d assets/web
+          test -n "$(git ls-files -- assets/web)"
+          git diff --exit-code -- assets/web
+          test -z "$(git ls-files --others --exclude-standard -- assets/web)"
+
   verify:
+    needs: frontend
     strategy:
       fail-fast: false
       matrix:

@@ -268,10 +268,12 @@ curl -H "Authorization: Bearer $FILEHARBOR_API_TOKEN" \
 
 ## 安装脚本与发布包
 
+推送符合 `vMAJOR.MINOR.PATCH` 格式的 Git tag 会自动验证前端与 Go 代码、构建全部支持平台的发布包，并在所有构建成功后创建对应的 GitHub Release，附加安装脚本、七个归档包及其 SHA-256 校验文件。手动运行 Release FileHarbor workflow 仅用于已有 tag 的重建或补齐发布资源。
+
 发布包名为 `fileharbor-<os>-<arch>`，其中 Windows 二进制为 `fileharbor.exe`，其他平台为 `fileharbor`。Linux/macOS 可用经过 SHA-256 校验的安装脚本：
 
 ```sh
-curl -fsSLO https://github.com/irains/fileharbor/releases/latest/download/fileharbor.sh
+curl -fsSLO https://github.com/irains/goFile/releases/latest/download/fileharbor.sh
 sudo bash fileharbor.sh
 ```
 
@@ -279,9 +281,26 @@ sudo bash fileharbor.sh
 
 ## 开发
 
-Go 没有 LTSC/LTS 发布通道。本项目目标为 Go 1.27.x，并应保持在该补丁线最新版本。
+Go 没有 LTSC/LTS 发布通道。本项目目标为 Go 1.27.x，并应保持在该补丁线最新版本。React/Vite 前端源代码位于 `web/`，需要 Node 24；其构建产物在 `assets/web/` 中提交并由 Go 二进制嵌入。修改前端后必须重新构建并提交更新的 `assets/web/`，不要提交 `web/node_modules/`。
 
 ```sh
+# 首次前端开发或 package-lock.json 变化后
+cd web
+npm ci
+npm test
+npm run lint
+npm run typecheck
+rm -rf ../assets/web
+npm run build
+cd ..
+
+# 确认 Vite 生成的嵌入资源已提交
+test -d assets/web
+test -n "$(git ls-files -- assets/web)"
+git diff --exit-code -- assets/web
+test -z "$(git ls-files --others --exclude-standard -- assets/web)"
+
+# Go 检查
 gofmt -w $(git ls-files '*.go')
 go mod tidy
 go vet ./...
@@ -289,5 +308,7 @@ go test ./...
 go test -race ./...
 go build ./...
 ```
+
+前端开发服务器（如 Vite 配置提供）仅用于本地迭代；在运行 Go 服务、构建 Docker 镜像或制作发布包前，始终先执行 `npm run build` 生成 `assets/web/`。Docker 多阶段构建会使用 Node 24 从 `web/` 生成该目录，GitHub Actions 不构建或冒烟测试 Docker 镜像。
 
 发布前应在 Linux 与 Windows 运行完整测试和构建矩阵。Windows 的私有状态目录仍依赖部署帐户的 ACL，Unix 风格的 `0700`/`0600` 模式位不能单独证明 Windows ACL 私密性。

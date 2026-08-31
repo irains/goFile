@@ -1,0 +1,51 @@
+import { useState } from 'react';
+import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from '@mui/material';
+import { Controller, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { ApiError, api } from '../api/client';
+import { getRuntime, routeUrl } from '../runtime';
+import { useI18n } from '../i18n';
+import { useSession } from '../session/SessionProvider';
+
+const loginSchema = z.object({ username: z.string().trim().min(1), password: z.string().min(1) });
+type LoginValues = z.infer<typeof loginSchema>;
+
+export function LoginPage() {
+  const { t } = useI18n();
+  const { setSession } = useSession();
+  const [serverError, setServerError] = useState<string | null>(null);
+  const { control, handleSubmit, formState: { isSubmitting, errors } } = useForm<LoginValues>({ resolver: zodResolver(loginSchema), defaultValues: { username: '', password: '' } });
+  const onSubmit = async (values: LoginValues) => {
+    setServerError(null);
+    try {
+      const session = await api.login(values.username, values.password);
+      setSession(session);
+      window.location.assign(getRuntime().loginNext);
+    } catch (error) {
+      setServerError(error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'));
+    }
+  };
+  return <Box component="main" sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 4 }, bgcolor: 'background.default' }}>
+    <Card elevation={0} sx={{ width: 'min(100%, 440px)', border: '1px solid', borderColor: 'divider', borderRadius: 3, bgcolor: 'background.paper' }}>
+      <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
+        <Stack spacing={3} component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
+          <Box>
+            <Typography variant="overline" color="primary.light" fontWeight={800} letterSpacing=".13em">FILEHARBOR</Typography>
+            <Typography component="h1" variant="h4" fontWeight={800}>{t('login.title')}</Typography>
+            <Typography color="text.secondary" sx={{ mt: 1 }}>{t('login.subtitle')}</Typography>
+          </Box>
+          {serverError && <Alert severity="error">{serverError}</Alert>}
+          <Controller name="username" control={control} render={({ field }) => <TextField {...field} autoComplete="username" autoFocus label={t('login.username')} error={Boolean(errors.username)} helperText={errors.username ? t('error.invalid_request') : undefined} fullWidth required />} />
+          <Controller name="password" control={control} render={({ field }) => <TextField {...field} type="password" autoComplete="current-password" label={t('login.password')} error={Boolean(errors.password)} helperText={errors.password ? t('error.invalid_request') : undefined} fullWidth required />} />
+          <Button type="submit" size="large" variant="contained" disabled={isSubmitting}>{t('login.signIn')}</Button>
+        </Stack>
+      </CardContent>
+    </Card>
+  </Box>;
+}
+
+export function isLoginRoute() {
+  const current = window.location.pathname.replace(/\/+$/, '') || '/';
+  return current === routeUrl('login').replace(/\/+$/, '');
+}

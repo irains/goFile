@@ -138,9 +138,8 @@ type UploadStore struct {
 	config UploadConfig
 	now    func() time.Time
 
-	locksMu   sync.Mutex
 	reapMu    sync.Mutex
-	locks     map[string]*sync.Mutex
+	locks     [64]sync.Mutex
 	partSlots chan struct{}
 }
 
@@ -158,7 +157,6 @@ func NewUploadStore(state *RuntimeState, config UploadConfig) (*UploadStore, err
 		state:     state,
 		config:    config,
 		now:       time.Now,
-		locks:     make(map[string]*sync.Mutex),
 		partSlots: make(chan struct{}, config.MaxConcurrentParts),
 	}
 	if err := store.Recover(); err != nil {
@@ -537,6 +535,15 @@ func (store *UploadStore) Complete(info auth.Info, id, token string) (*UploadSta
 		status := manifestStatus(manifest)
 		return &status, true, nil
 	}
+	if manifest.State == uploadStateFinalizing {
+		if err := store.recoverFinalizing(manifest); err != nil {
+			return nil, false, err
+		}
+		if manifest.State == uploadStateCompleted {
+			status := manifestStatus(manifest)
+			return &status, true, nil
+		}
+	}
 	if manifest.State != uploadStateActive || len(manifest.Parts) != manifest.PartCount {
 		return nil, false, errUploadIncomplete
 	}
@@ -558,6 +565,14 @@ func (store *UploadStore) Cancel(info auth.Info, id, token string) error {
 	}
 	if manifest.State == uploadStateCompleted {
 		return errUploadConflict
+	}
+	if manifest.State == uploadStateFinalizing {
+		if err := store.recoverFinalizing(manifest); err != nil {
+			return err
+		}
+		if manifest.State == uploadStateCompleted {
+			return errUploadConflict
+		}
 	}
 	if manifest.State == uploadStateCancelled {
 		return nil
@@ -648,14 +663,12 @@ func (store *UploadStore) authorizedManifest(info auth.Info, id, token string) (
 }
 
 func (store *UploadStore) lockFor(id string) *sync.Mutex {
-	store.locksMu.Lock()
-	defer store.locksMu.Unlock()
-	lock := store.locks[id]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		store.locks[id] = lock
+	var hash uint32 = 2166136261
+	for _, value := range id {
+		hash ^= uint32(value)
+		hash *= 16777619
 	}
-	return lock
+	return &store.locks[hash%uint32(len(store.locks))]
 }
 
 func (store *UploadStore) validateCreate(request *UploadCreateRequest) error {

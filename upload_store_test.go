@@ -205,6 +205,118 @@ func TestUploadStoreRecoversVerifiedPartsAndRejectsTampering(t *testing.T) {
 	}
 }
 
+func TestUploadStoreRetriesFinalizingUploadWithoutRestart(t *testing.T) {
+	root, _, store, info := newUploadStoreForTest(t)
+	contents := []byte("retry finalizing upload")
+	digest := sha256Digest(contents)
+	if _, _, err := store.Create(info, testUploadID, testUploadToken, UploadCreateRequest{Path: "", Name: "retry.txt", Size: int64(len(contents)), ExpectedSHA256: digest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.WritePart(info, testUploadID, testUploadToken, 0, digest, bytes.NewReader(contents)); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest, err := store.loadManifest(testUploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.State = uploadStateFinalizing
+	manifest.StageName = uploadStageName(testUploadID)
+	manifest.UpdatedAt = store.now().UTC()
+	manifest.ExpiresAt = manifest.UpdatedAt.Add(store.config.InactivityTTL)
+	if err := store.saveManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	stage, err := store.stagePath(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stage, []byte("stale incomplete stage"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, repeated, err := store.Complete(info, testUploadID, testUploadToken)
+	if err != nil || repeated || status.State != uploadStateCompleted || status.FinalPath != "retry.txt" || status.FinalSHA256 != digest {
+		t.Fatalf("retry complete = %#v, repeated=%t, err=%v", status, repeated, err)
+	}
+	published, err := os.ReadFile(filepath.Join(root, "retry.txt"))
+	if err != nil || !bytes.Equal(published, contents) {
+		t.Fatalf("published retry contents = %q, %v", published, err)
+	}
+	if _, err := os.Stat(stage); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging file remains after retry: %v", err)
+	}
+}
+
+func TestUploadStoreCompletesPublishedFinalizationOnRetryWithoutRestart(t *testing.T) {
+	root, _, store, info := newUploadStoreForTest(t)
+	contents := []byte("complete published finalization")
+	digest := sha256Digest(contents)
+	if _, _, err := store.Create(info, testUploadID, testUploadToken, UploadCreateRequest{Path: "", Name: "published.txt", Size: int64(len(contents)), ExpectedSHA256: digest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.WritePart(info, testUploadID, testUploadToken, 0, digest, bytes.NewReader(contents)); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := store.loadManifest(testUploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.State = uploadStateFinalizing
+	manifest.StageName = uploadStageName(testUploadID)
+	manifest.UpdatedAt = store.now().UTC()
+	manifest.ExpiresAt = manifest.UpdatedAt.Add(store.config.InactivityTTL)
+	if err := store.saveManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "published.txt"), contents, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	status, repeated, err := store.Complete(info, testUploadID, testUploadToken)
+	if err != nil || !repeated || status.State != uploadStateCompleted || status.FinalPath != "published.txt" || status.FinalSHA256 != digest {
+		t.Fatalf("published retry complete = %#v, repeated=%t, err=%v", status, repeated, err)
+	}
+	manifest, err = store.loadManifest(testUploadID)
+	if err != nil || manifest.State != uploadStateCompleted || len(manifest.Parts) != 0 {
+		t.Fatalf("completed manifest = %#v, err=%v", manifest, err)
+	}
+}
+
+func TestUploadStoreDoesNotCancelPublishedFinalization(t *testing.T) {
+	root, _, store, info := newUploadStoreForTest(t)
+	contents := []byte("published finalization cannot be cancelled")
+	digest := sha256Digest(contents)
+	if _, _, err := store.Create(info, testUploadID, testUploadToken, UploadCreateRequest{Path: "", Name: "cannot-cancel.txt", Size: int64(len(contents)), ExpectedSHA256: digest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.WritePart(info, testUploadID, testUploadToken, 0, digest, bytes.NewReader(contents)); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := store.loadManifest(testUploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.State = uploadStateFinalizing
+	manifest.StageName = uploadStageName(testUploadID)
+	manifest.UpdatedAt = store.now().UTC()
+	manifest.ExpiresAt = manifest.UpdatedAt.Add(store.config.InactivityTTL)
+	if err := store.saveManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cannot-cancel.txt"), contents, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Cancel(info, testUploadID, testUploadToken); !errors.Is(err, errUploadConflict) {
+		t.Fatalf("cancel published finalization error = %v", err)
+	}
+	status, err := store.Status(info, testUploadID, testUploadToken)
+	if err != nil || status.State != uploadStateCompleted || status.FinalPath != "cannot-cancel.txt" {
+		t.Fatalf("status after rejected cancel = %#v, err=%v", status, err)
+	}
+}
+
 func TestUploadStoreRecoversPublishedDestinationBeforeCompletedManifest(t *testing.T) {
 	root, state, store, info := newUploadStoreForTest(t)
 	contents := []byte("recover published destination")

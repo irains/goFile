@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"html/template"
 	"io"
 	"io/fs"
 	"net"
@@ -22,19 +21,16 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
-	"github.com/irains/fileharbor/assets"
 	"github.com/irains/fileharbor/auth"
 	"github.com/irains/fileharbor/conf"
-	"github.com/irains/fileharbor/i18n"
 	"github.com/irains/fileharbor/utils"
 )
 
 var (
-	reader       bool
-	uploader     bool
-	basePath     string
-	templateSets map[i18n.LangType]*template.Template
-	uploads      *UploadStore
+	reader   bool
+	uploader bool
+	basePath string
+	uploads  *UploadStore
 )
 
 var (
@@ -52,84 +48,11 @@ const (
 	contextAuthInfo = "authInfo"
 )
 
-func initTemplates() {
-	templateSets = make(map[i18n.LangType]*template.Template)
-	for _, lang := range []i18n.LangType{i18n.EN, i18n.ZH} {
-		l := lang
-		templateSets[l] = template.Must(template.New("").Funcs(template.FuncMap{
-			"t":           func(key string) string { return i18n.Translate(key, l) },
-			"previewable": isInlinePreviewable,
-			"appPath":     appPath,
-			"js": func(value interface{}) template.JS {
-				encoded, err := json.Marshal(value)
-				if err != nil {
-					return template.JS("null")
-				}
-				return template.JS(string(encoded))
-			},
-		}).ParseFS(assets.Templates, "templates/*"))
-	}
-}
-
-func getLang(c *gin.Context) i18n.LangType {
-	if lang, ok := c.Get("lang"); ok {
-		return lang.(i18n.LangType)
-	}
-	return i18n.ZH
-}
-
-func LangMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		lang := c.GetHeader("Accept-Language")
-		langType := i18n.ZH
-		if strings.Contains(strings.ToLower(lang), "en") && !strings.Contains(strings.ToLower(lang), "zh") {
-			langType = i18n.EN
-		}
-		c.Set("lang", langType)
-		c.Next()
-	}
-}
-
-func formatBytes(b uint64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := uint64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
 func authInfo(c *gin.Context) auth.Info {
 	if value, ok := c.Get(contextAuthInfo); ok {
 		return value.(auth.Info)
 	}
 	return auth.Info{}
-}
-
-func renderHTML(c *gin.Context, name string, data gin.H) {
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	setPrivateResponse(c)
-	lang := getLang(c)
-	data["htmlLang"] = map[i18n.LangType]string{i18n.ZH: "zh-CN", i18n.EN: "en"}[lang]
-	data["basePath"] = basePath
-	data["allowUpload"] = !reader || uploader
-	data["reader"] = reader
-	info := authInfo(c)
-	data["csrf"] = info.CSRF
-	data["username"] = info.Username
-	if total, free := utils.DiskUsage(conf.FileHarbor); total > 0 {
-		used := total - free
-		data["diskPct"] = int(used * 100 / total)
-		data["diskFree"] = formatBytes(free)
-		data["diskTotal"] = formatBytes(total)
-	}
-	if err := templateSets[lang].ExecuteTemplate(c.Writer, name, data); err != nil {
-		_ = c.AbortWithError(http.StatusInternalServerError, err)
-	}
 }
 
 func recordAction(state *RuntimeState, c *gin.Context, event, outcome, path, code string, affected int) error {
@@ -456,38 +379,24 @@ func isInlinePreviewable(name string) bool {
 	}
 }
 
-func renderDirectory(c *gin.Context, manager *auth.Manager, state *RuntimeState, rawPath string) {
+func renderDirectory(c *gin.Context, state *RuntimeState, rawPath string) {
 	cleanPath, err := utils.CleanRelative(rawPath, true)
 	if err != nil {
 		hiddenNotFound(c)
 		return
 	}
-	info, err := utils.ListDirectory(cleanPath)
-	if err != nil {
+	if _, err := utils.ListDirectory(cleanPath); err != nil {
 		hiddenNotFound(c)
 		return
 	}
-	listingItems := make([]auth.ListingItem, 0, len(info.Entries))
-	for _, entry := range info.Entries {
-		listingItems = append(listingItems, auth.ListingItem{Name: entry.Name, Version: entry.Version})
+	_ = logAction(state, c, "directory.list", cleanPath)
+	bundle, err := loadWebAssets()
+	if err != nil {
+		setPrivateResponse(c)
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
+		return
 	}
-	listingToken := ""
-	if session := authInfo(c); session.SessionID != "" {
-		listingToken, _ = manager.IssueListing(session.SessionID, cleanPath, listingItems)
-	}
-	pagePath := ""
-	if cleanPath != "" {
-		pagePath = cleanPath + "/"
-	}
-	_ = logAction(state, c, "directory.list", pagePath)
-	renderHTML(c, "index.tmpl", gin.H{
-		"info":         info,
-		"path":         pagePath,
-		"rawPath":      cleanPath,
-		"prev":         appPath(utils.GetPrevPath(cleanPath)),
-		"hasParent":    cleanPath != "",
-		"listingToken": listingToken,
-	})
+	serveShell(c, bundle)
 }
 
 func fileForRead(raw string) (string, string, os.FileInfo, error) {
@@ -601,11 +510,14 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 	if state == nil {
 		panic("runtime state is required")
 	}
-	initTemplates()
+	bundle, err := loadWebAssets()
+	if err != nil {
+		panic(err)
+	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	_ = router.SetTrustedProxies(nil)
-	router.Use(gin.Recovery(), LangMiddleware())
+	router.Use(gin.Recovery())
 	router.GET("/healthz", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -619,12 +531,14 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	router.GET("/login", func(c *gin.Context) {
-		setPrivateResponse(c)
 		if _, ok := manager.SessionFromRequest(c.Request); ok {
 			c.Redirect(http.StatusFound, appPath("/"))
 			return
 		}
-		renderHTML(c, "login.tmpl", gin.H{"next": safeNextPath(c.Query("next"))})
+		serveShell(c, bundle)
+	})
+	router.GET("/assets/*asset", func(c *gin.Context) {
+		serveWebAsset(c, bundle)
 	})
 	router.POST("/login", boundedFormBody(64<<10), func(c *gin.Context) {
 		setPrivateResponse(c)
@@ -638,15 +552,24 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 			}
 			_ = state.Record(AuditEvent{Event: "auth.login", Outcome: outcome, AuthMethod: "session", ClientIP: c.ClientIP()})
 			if !errors.Is(err, auth.ErrInvalidCredentials) && !errors.Is(err, auth.ErrRateLimited) {
-				c.Status(http.StatusInternalServerError)
+				if wantsJSON(c) {
+					c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "io_error"})
+				} else {
+					c.Status(http.StatusInternalServerError)
+				}
 				return
 			}
 			status := http.StatusUnauthorized
+			code := "invalid_credentials"
 			if errors.Is(err, auth.ErrRateLimited) {
 				status = http.StatusTooManyRequests
+				code = "rate_limited"
 			}
-			c.Status(status)
-			renderHTML(c, "login.tmpl", gin.H{"error": "loginFailed", "next": safeNextPath(c.PostForm("next"))})
+			if wantsJSON(c) {
+				c.JSON(status, gin.H{"ok": false, "code": code})
+			} else {
+				c.Status(status)
+			}
 			return
 		}
 		_ = state.Record(AuditEvent{Event: "auth.login", Outcome: "success", Principal: info.Username, AuthMethod: "session", ClientIP: c.ClientIP()})
@@ -655,17 +578,43 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 		c.Redirect(http.StatusFound, safeNextPath(c.PostForm("next")))
 	})
 
+	router.POST("/api/session/login", sessionLoginHandler(manager, state))
+
+	apiSession := router.Group("/api/session")
+	apiSession.Use(authRequired(manager))
+	apiSession.GET("", sessionGetHandler())
+	apiSession.POST("/logout", csrfRequired(manager), sessionLogoutHandler(manager, state))
+
 	protected := router.Group("/")
 	protected.Use(authRequired(manager))
-	protected.GET("/", func(c *gin.Context) { renderDirectory(c, manager, state, "") })
+	protected.GET("/", func(c *gin.Context) { renderDirectory(c, state, "") })
+	protected.GET("/edit/*path", func(c *gin.Context) {
+		_, rel, info, err := fileForRead(c.Param("path"))
+		if err != nil {
+			hiddenNotFound(c)
+			return
+		}
+		if info.Size() > maxEditorBytes {
+			setPrivateResponse(c)
+			jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
+			return
+		}
+		_ = logAction(state, c, "file.edit", rel)
+		serveShell(c, bundle)
+	})
 	protected.GET("/d/*path", func(c *gin.Context) {
 		raw := pathFromParam(c.Param("path"))
 		if raw == "" {
 			c.Redirect(http.StatusMovedPermanently, appPath("/"))
 			return
 		}
-		renderDirectory(c, manager, state, raw)
+		renderDirectory(c, state, raw)
 	})
+	protected.GET("/api/listing", listingHandler(manager, state))
+	protected.GET("/api/editor/content", editorContentHandler(state))
+	if !reader {
+		protected.PUT("/api/editor/content", csrfRequired(manager), mutationAuditMiddleware(state), editorSaveHandler(state))
+	}
 	protected.GET("/view/*path", func(c *gin.Context) {
 		absolute, rel, _, err := fileForRead(c.Param("path"))
 		if err != nil {
@@ -731,31 +680,6 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 		c.Header("X-Content-Type-Options", "nosniff")
 		_ = logAction(state, c, "file.download", rel)
 		c.FileAttachment(absolute, filepath.Base(rel))
-	})
-	protected.GET("/edit/*path", func(c *gin.Context) {
-		absolute, rel, info, err := fileForRead(c.Param("path"))
-		if err != nil {
-			hiddenNotFound(c)
-			return
-		}
-		if info.Size() > maxEditorBytes {
-			setPrivateResponse(c)
-			jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
-			return
-		}
-		file, err := os.Open(absolute)
-		if err != nil {
-			hiddenNotFound(c)
-			return
-		}
-		data, readErr := io.ReadAll(io.LimitReader(file, maxEditorBytes+1))
-		closeErr := file.Close()
-		if readErr != nil || closeErr != nil || int64(len(data)) > maxEditorBytes {
-			hiddenNotFound(c)
-			return
-		}
-		_ = logAction(state, c, "file.edit", rel)
-		renderHTML(c, "editor.tmpl", gin.H{"data": string(data), "path": rel})
 	})
 	protected.GET("/api/directories", func(c *gin.Context) {
 		setPrivateResponse(c)
@@ -1052,7 +976,8 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 
 	if !reader {
 		mutations := protected.Group("/")
-		mutations.Use(boundedFormBody(maxEditorBytes+64<<10), csrfRequired(manager), mutationAuditMiddleware(state))
+		mutations.Use(csrfRequired(manager), mutationAuditMiddleware(state))
+		mutations.Use(boundedFormBody(maxEditorBytes + 64<<10))
 		mutations.POST("/do/newdir", func(c *gin.Context) {
 			if !requireAudit(c, state, "directory.create", "", 1) {
 				return
@@ -1362,6 +1287,15 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 		http.SetCookie(c.Writer, manager.ExpiredCookie())
 		http.SetCookie(c.Writer, manager.ExpiredLegacyCookie())
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	router.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/do/") {
+			setPrivateResponse(c)
+			c.JSON(http.StatusNotFound, gin.H{"ok": false, "code": "not_found"})
+			return
+		}
+		hiddenNotFound(c)
 	})
 
 	return router

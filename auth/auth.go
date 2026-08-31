@@ -174,6 +174,7 @@ type Info struct {
 	Username  string
 	SessionID string
 	CSRF      string
+	Expires   time.Time
 	Bearer    bool
 }
 
@@ -288,7 +289,7 @@ func (m *Manager) Login(ip, username, password string) (Info, string, time.Time,
 	}
 	expires := now.Add(SessionDuration)
 	m.sessions[id] = session{Username: m.config.Username, CSRF: csrf, Expires: expires}
-	return Info{Username: m.config.Username, SessionID: id, CSRF: csrf}, m.signSessionID(id), expires, nil
+	return Info{Username: m.config.Username, SessionID: id, CSRF: csrf, Expires: expires}, m.signSessionID(id), expires, nil
 }
 
 func (m *Manager) SessionFromRequest(r *http.Request) (Info, bool) {
@@ -308,7 +309,7 @@ func (m *Manager) SessionFromRequest(r *http.Request) (Info, bool) {
 	if !ok || !now.Before(s.Expires) {
 		return Info{}, false
 	}
-	return Info{Username: s.Username, SessionID: id, CSRF: s.CSRF}, true
+	return Info{Username: s.Username, SessionID: id, CSRF: s.CSRF, Expires: s.Expires}, true
 }
 
 func (m *Manager) IsBearerToken(value string) bool {

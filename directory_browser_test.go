@@ -38,10 +38,10 @@ func requestDirectoryBrowser(t *testing.T, router http.Handler, cookie *http.Coo
 }
 
 func TestDirectoryBrowserAPI(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 
 	for _, dir := range []string{"alpha", "empty", filepath.Join("alpha", "nested")} {
@@ -110,10 +110,10 @@ func TestDirectoryBrowserAPI(t *testing.T) {
 }
 
 func TestDirectoryBrowserRemainsAvailableReadOnlyAndMounted(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), true, false, "/gofile"
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	if err := os.Mkdir(filepath.Join(conf.FileHarbor, "reports"), 0755); err != nil {
 		t.Fatal(err)
@@ -134,11 +134,11 @@ func TestDirectoryBrowserRemainsAvailableReadOnlyAndMounted(t *testing.T) {
 	}
 }
 
-func TestDirectoryRowsExposeRefreshAndSafeParentNavigation(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+func TestDirectoryListingShellAndAPI(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	if err := os.MkdirAll(filepath.Join(conf.FileHarbor, "nested", "empty"), 0755); err != nil {
 		t.Fatal(err)
@@ -150,101 +150,97 @@ func TestDirectoryRowsExposeRefreshAndSafeParentNavigation(t *testing.T) {
 	router := newTestRouter(t, testManager(t))
 	cookie := loginCookie(t, router)
 	response := requestDirectoryBrowser(t, router, cookie, "/d/nested")
-	if response.Code != http.StatusOK {
-		t.Fatalf("nested listing status = %d", response.Code)
-	}
-	page := response.Body.String()
-	for _, want := range []string{"id=\"refreshButton\"", "<tr class=\"parent-row\">", "href=\"/\"", "data-entry=\"true\"", "tbody tr[data-entry=\"true\"]"} {
-		if !strings.Contains(page, want) {
-			t.Fatalf("nested listing missing %q", want)
-		}
-	}
-	parentStart := strings.Index(page, "<tr class=\"parent-row\">")
-	parentEnd := strings.Index(page[parentStart:], "</tr>")
-	if parentStart < 0 || parentEnd < 0 {
-		t.Fatal("parent row was not rendered as a complete row")
-	}
-	parentRow := page[parentStart : parentStart+parentEnd]
-	for _, forbidden := range []string{"data-entry", "entry-check", "data-name", "data-path", "dropdown"} {
-		if strings.Contains(parentRow, forbidden) {
-			t.Fatalf("parent row unexpectedly contains %q: %s", forbidden, parentRow)
-		}
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "id=\"root\"") {
+		t.Fatalf("nested shell response = %d: %s", response.Code, response.Body.String())
 	}
 
-	response = requestDirectoryBrowser(t, router, cookie, "/d/nested/empty")
+	response = requestDirectoryBrowser(t, router, cookie, "/api/listing?path=nested")
 	if response.Code != http.StatusOK {
-		t.Fatalf("empty nested listing status = %d", response.Code)
+		t.Fatalf("nested listing API status = %d: %s", response.Code, response.Body.String())
 	}
-	page = response.Body.String()
-	if !strings.Contains(page, "<tr class=\"parent-row\">") || strings.Contains(page, "<section class=\"empty-state\"") || !strings.Contains(page, "href=\"/d/nested\"") {
-		t.Fatalf("empty nested listing did not retain parent navigation: %s", page)
+	var body struct {
+		OK        bool `json:"ok"`
+		Directory struct {
+			Path         string `json:"path"`
+			ListingToken string `json:"listing_token"`
+			Entries      []struct {
+				Name string `json:"name"`
+				Path string `json:"path"`
+			} `json:"entries"`
+		} `json:"directory"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.OK || body.Directory.Path != "nested" || body.Directory.ListingToken == "" || len(body.Directory.Entries) != 2 || body.Directory.Entries[0].Path != "nested/empty" || body.Directory.Entries[1].Name != "document.txt" {
+		t.Fatalf("nested listing response = %#v", body)
 	}
 }
 
-func TestReliableUploadQueueRendersAcrossUploadModes(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads := conf.FileHarbor, reader, uploader, basePath, templateSets, uploads
+func TestListingCapabilitiesReflectUploadModes(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath, previousUploads := conf.FileHarbor, reader, uploader, basePath, uploads
 	conf.FileHarbor, reader, uploader, basePath, uploads = t.TempDir(), false, false, "/fileharbor", nil
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads
+		conf.FileHarbor, reader, uploader, basePath, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousUploads
 	})
-
-	renderPage := func(t *testing.T, writable, uploadOnly bool) string {
-		t.Helper()
-		reader, uploader, uploads = !writable, uploadOnly, nil
-		handler := withBasePath(newTestRouter(t, testManager(t)))
-		cookie := loginCookie(t, handler)
-		response := requestDirectoryBrowser(t, handler, cookie, "/fileharbor/")
-		if response.Code != http.StatusOK {
-			t.Fatalf("listing status = %d: %s", response.Code, response.Body.String())
-		}
-		return response.Body.String()
-	}
 
 	for _, mode := range []struct {
 		name       string
 		writable   bool
 		uploadOnly bool
-		visible    bool
+		upload     bool
+		editor     bool
 	}{
-		{name: "normal", writable: true, visible: true},
-		{name: "upload-only", uploadOnly: true, visible: true},
-		{name: "strict-read-only", visible: false},
+		{name: "normal", writable: true, upload: true, editor: true},
+		{name: "upload-only", uploadOnly: true, upload: true},
+		{name: "strict-read-only"},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
-			page := renderPage(t, mode.writable, mode.uploadOnly)
-			if mode.visible {
-				for _, want := range []string{"id=\"fileInput\" multiple", "id=\"uploadQueue\" role=\"list\"", "appURL('/api/uploads", "XMLHttpRequest", "indexedDB.open"} {
-					if !strings.Contains(page, want) {
-						t.Fatalf("reliable upload page missing %q", want)
-					}
-				}
-				for _, forbidden := range []string{"id=\"uploadProgress\"", "id=\"uploadProgressBar\"", "'/do/upload/'", "new FormData()"} {
-					if strings.Contains(page, forbidden) {
-						t.Fatalf("reliable upload page retained legacy %q", forbidden)
-					}
-				}
-			} else if strings.Contains(page, "id=\"fileInput\"") || strings.Contains(page, "id=\"uploadQueue\"") {
-				t.Fatal("strict read-only page rendered upload queue")
+			reader, uploader, uploads = !mode.writable, mode.uploadOnly, nil
+			handler := withBasePath(newTestRouter(t, testManager(t)))
+			cookie := loginCookie(t, handler)
+			response := requestDirectoryBrowser(t, handler, cookie, "/fileharbor/api/session")
+			if response.Code != http.StatusOK {
+				t.Fatalf("listing status = %d: %s", response.Code, response.Body.String())
+			}
+			var body struct {
+				Capabilities struct {
+					Upload     bool `json:"upload"`
+					EditorSave bool `json:"editor_save"`
+				} `json:"capabilities"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Capabilities.Upload != mode.upload || body.Capabilities.EditorSave != mode.editor {
+				t.Fatalf("capabilities = %#v", body.Capabilities)
 			}
 		})
 	}
 }
 
-func TestRootEmptyListingRemainsAnEmptyState(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+func TestRootEmptyListingReturnsEmptyEntries(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 
 	router := newTestRouter(t, testManager(t))
 	cookie := loginCookie(t, router)
-	response := requestDirectoryBrowser(t, router, cookie, "/")
+	response := requestDirectoryBrowser(t, router, cookie, "/api/listing")
 	if response.Code != http.StatusOK {
 		t.Fatalf("empty root listing status = %d", response.Code)
 	}
-	page := response.Body.String()
-	if !strings.Contains(page, "<section class=\"empty-state\"") || strings.Contains(page, "<tr class=\"parent-row\">") {
-		t.Fatalf("root empty listing state = %s", page)
+	var body struct {
+		Directory struct {
+			Entries []json.RawMessage `json:"entries"`
+		} `json:"directory"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Directory.Entries == nil || len(body.Directory.Entries) != 0 {
+		t.Fatalf("empty root entries = %#v", body.Directory.Entries)
 	}
 }

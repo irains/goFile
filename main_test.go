@@ -111,10 +111,10 @@ func TestSafeNextPathUsesPublicBase(t *testing.T) {
 }
 
 func TestMountedBasePathRoutesAndGeneratesPublicURLs(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, "/gofile"
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	if err := os.WriteFile(filepath.Join(conf.FileHarbor, "a.txt"), []byte("a"), 0644); err != nil {
 		t.Fatal(err)
@@ -156,20 +156,28 @@ func TestMountedBasePathRoutesAndGeneratesPublicURLs(t *testing.T) {
 		t.Fatalf("mounted listing status = %d", response.Code)
 	}
 	page := response.Body.String()
-	for _, want := range []string{"href=\"/gofile/\"", "href=\"/gofile/download/a.txt\"", "const appBase = \"/gofile\""} {
+	bundle, err := loadWebAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"/gofile/assets/" + bundle.entry.File, "fileharbor-base\" content=\"/gofile", "fileharbor-nonce"} {
 		if !strings.Contains(page, want) {
-			t.Fatalf("mounted listing missing %q", want)
+			t.Fatalf("mounted shell missing %q", want)
 		}
 	}
-	if strings.Contains(page, "apiCommand") || strings.Contains(page, "copyApi") {
-		t.Fatal("listing still exposes API upload command")
+
+	request = httptest.NewRequest(http.MethodGet, "/gofile/assets/"+bundle.entry.File, nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("mounted asset status = %d", response.Code)
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/gofile/login", nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if !strings.Contains(response.Body.String(), "action=\"/gofile/login\"") {
-		t.Fatal("mounted login form action is not prefixed")
+	if !strings.Contains(response.Body.String(), "id=\"root\"") {
+		t.Fatal("mounted login does not serve the SPA shell")
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/gofile-other/", nil)
@@ -181,10 +189,10 @@ func TestMountedBasePathRoutesAndGeneratesPublicURLs(t *testing.T) {
 }
 
 func TestHealthAndReadinessRoutes(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	state := newTestState(t)
 	router := newRouter(testManager(t), state)
@@ -257,10 +265,10 @@ func TestRequestGateRejectsNewRequestsAndDrainsAdmittedHandlers(t *testing.T) {
 }
 
 func TestRouterRequiresAuthentication(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	if err := os.WriteFile(filepath.Join(conf.FileHarbor, "a.txt"), []byte("a"), 0644); err != nil {
 		t.Fatal(err)
@@ -286,10 +294,10 @@ func TestRouterRequiresAuthentication(t *testing.T) {
 }
 
 func TestBatchDownloadRouteDoesNotConflictWithFileDownloads(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	router := newTestRouter(t, testManager(t))
 	request := httptest.NewRequest(http.MethodGet, "/batch-download/not-a-ticket", nil)
@@ -353,10 +361,10 @@ func multipartRequestWithFileField(t *testing.T, target, field, name string, con
 }
 
 func TestChunkRoutesRejectInvalidIdentifiersAndDuplicateParts(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	manager := testManager(t)
 	router := newTestRouter(t, manager)
@@ -388,10 +396,10 @@ func TestChunkRoutesRejectInvalidIdentifiersAndDuplicateParts(t *testing.T) {
 }
 
 func TestUploadRoutesCleanUnexpectedMultipartFiles(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	manager := testManager(t)
 	state := newTestState(t)
@@ -425,12 +433,12 @@ func TestUploadRoutesCleanUnexpectedMultipartFiles(t *testing.T) {
 }
 
 func TestUploadRoutesRejectOversizedRequestBodies(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	previousUploadLimit, previousChunkLimit := maxUploadBodyBytes, maxChunkBodyBytes
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	maxUploadBodyBytes, maxChunkBodyBytes = 1024, 1024
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 		maxUploadBodyBytes, maxChunkBodyBytes = previousUploadLimit, previousChunkLimit
 	})
 	manager := testManager(t)
@@ -454,12 +462,12 @@ func TestUploadRoutesRejectOversizedRequestBodies(t *testing.T) {
 }
 
 func TestChunkUploadRespectsGlobalStorageQuota(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	previousStorageLimit := maxChunkStorageBytes
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	maxChunkStorageBytes = 5
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 		maxChunkStorageBytes = previousStorageLimit
 	})
 	manager := testManager(t)
@@ -495,10 +503,10 @@ func sessionCSRF(t *testing.T, manager *auth.Manager, cookie *http.Cookie) strin
 }
 
 func TestChunkMergeRequiresCompleteStableSet(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	manager := testManager(t)
 	state := newTestState(t)
@@ -528,10 +536,10 @@ func TestChunkMergeRequiresCompleteStableSet(t *testing.T) {
 }
 
 func TestEditorRejectsOversizedFilesAndSaves(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	manager := testManager(t)
 	router := newTestRouter(t, manager)
@@ -568,10 +576,10 @@ func TestEditorRejectsOversizedFilesAndSaves(t *testing.T) {
 }
 
 func TestAPIUploadAllowsBearerOnly(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	router := newTestRouter(t, testManager(t))
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -612,10 +620,10 @@ func TestAPIUploadAllowsBearerOnly(t *testing.T) {
 }
 
 func TestLoginRejectsUnsafeNextAndPreviewIsPlainText(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates := conf.FileHarbor, reader, uploader, basePath, templateSets
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
 	})
 	if err := os.WriteFile(filepath.Join(conf.FileHarbor, "payload.html"), []byte("<script>alert(1)</script>"), 0644); err != nil {
 		t.Fatal(err)

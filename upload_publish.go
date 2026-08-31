@@ -48,12 +48,18 @@ func (store *UploadStore) publish(manifest *UploadManifest) error {
 	if err != nil {
 		return err
 	}
+	reset := func(cause error) error {
+		if resetErr := store.resetFinalizing(manifest, stage); resetErr != nil {
+			return resetErr
+		}
+		return cause
+	}
 	if err := removeRegularFile(stage); err != nil {
-		return err
+		return reset(err)
 	}
 	file, err := os.OpenFile(stage, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return errors.New("could not create upload staging file")
+		return reset(errors.New("could not create upload staging file"))
 	}
 	hash := sha256.New()
 	var written int64
@@ -61,57 +67,46 @@ func (store *UploadStore) publish(manifest *UploadManifest) error {
 		part, ok := manifest.Parts[index]
 		if !ok {
 			_ = file.Close()
-			_ = os.Remove(stage)
-			return errUploadIncomplete
+			return reset(errUploadIncomplete)
 		}
 		partPath, pathErr := store.partPath(manifest, index)
 		if pathErr != nil {
 			_ = file.Close()
-			_ = os.Remove(stage)
-			return pathErr
+			return reset(pathErr)
 		}
 		input, openErr := safeUploadPart(partPath, part)
 		if openErr != nil {
 			_ = file.Close()
-			_ = os.Remove(stage)
-			return openErr
+			return reset(openErr)
 		}
 		copied, copyErr := io.Copy(io.MultiWriter(file, hash), input)
 		closeErr := input.Close()
 		if copyErr != nil || closeErr != nil || copied != part.Size {
 			_ = file.Close()
-			_ = os.Remove(stage)
-			return errors.New("could not assemble upload")
+			return reset(errors.New("could not assemble upload"))
 		}
 		written += copied
 	}
 	if written != manifest.Size || file.Sync() != nil || file.Chmod(0644) != nil || file.Close() != nil {
 		_ = file.Close()
-		_ = os.Remove(stage)
-		return errUploadSizeMismatch
+		return reset(errUploadSizeMismatch)
 	}
 	finalDigest := hex.EncodeToString(hash.Sum(nil))
 	if manifest.ExpectedSHA256 != "" && manifest.ExpectedSHA256 != finalDigest {
-		if err := store.resetFinalizing(manifest, stage); err != nil {
-			return err
-		}
-		return errUploadInvalidDigest
+		return reset(errUploadInvalidDigest)
 	}
 	manifest.FinalSHA256 = finalDigest
 	manifest.UpdatedAt = store.now().UTC()
 	if err := store.saveManifest(manifest); err != nil {
-		return err
+		return reset(err)
 	}
 	// A same-directory hard link creates the requested name atomically and fails
 	// rather than replacing a file created by another operation.
 	if err := os.Link(stage, destination); err != nil {
-		if cleanupErr := store.resetFinalizing(manifest, stage); cleanupErr != nil {
-			return cleanupErr
-		}
 		if errors.Is(err, fs.ErrExist) {
-			return utils.ErrDestinationExists
+			return reset(utils.ErrDestinationExists)
 		}
-		return errors.New("could not publish upload")
+		return reset(errors.New("could not publish upload"))
 	}
 	if err := syncRuntimeDirectory(directory); err != nil {
 		return errors.New("could not sync upload destination")

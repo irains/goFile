@@ -16,10 +16,10 @@ import (
 )
 
 func TestReliableUploadRoutesUseSessionCSRFAndStableErrors(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads := conf.FileHarbor, reader, uploader, basePath, templateSets, uploads
+	previousRoot, previousReader, previousUploader, previousBasePath, previousUploads := conf.FileHarbor, reader, uploader, basePath, uploads
 	conf.FileHarbor, reader, uploader, basePath, uploads = t.TempDir(), false, false, "", nil
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads
+		conf.FileHarbor, reader, uploader, basePath, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousUploads
 	})
 	manager := testManager(t)
 	router := newTestRouter(t, manager)
@@ -64,10 +64,10 @@ func TestReliableUploadRoutesUseSessionCSRFAndStableErrors(t *testing.T) {
 }
 
 func TestReliableUploadRoutesAllowScopedBearerAndMapErrors(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads := conf.FileHarbor, reader, uploader, basePath, templateSets, uploads
+	previousRoot, previousReader, previousUploader, previousBasePath, previousUploads := conf.FileHarbor, reader, uploader, basePath, uploads
 	conf.FileHarbor, reader, uploader, basePath, uploads = t.TempDir(), false, false, "", nil
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads
+		conf.FileHarbor, reader, uploader, basePath, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousUploads
 	})
 	router := newTestRouter(t, testManager(t))
 	contents := []byte("bearer route")
@@ -106,10 +106,10 @@ func TestReliableUploadRoutesAllowScopedBearerAndMapErrors(t *testing.T) {
 }
 
 func TestReliableUploadRoutesWorkBelowBasePath(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads := conf.FileHarbor, reader, uploader, basePath, templateSets, uploads
+	previousRoot, previousReader, previousUploader, previousBasePath, previousUploads := conf.FileHarbor, reader, uploader, basePath, uploads
 	conf.FileHarbor, reader, uploader, basePath, uploads = t.TempDir(), false, false, "/fileharbor", nil
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads
+		conf.FileHarbor, reader, uploader, basePath, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousUploads
 	})
 	handler := withBasePath(newTestRouter(t, testManager(t)))
 	request := uploadCreateRequest("", "mounted.txt", 0, testUploadID, testUploadToken)
@@ -123,10 +123,10 @@ func TestReliableUploadRoutesWorkBelowBasePath(t *testing.T) {
 }
 
 func TestReliableUploadRoutesRespectReadOnlyModes(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads := conf.FileHarbor, reader, uploader, basePath, templateSets, uploads
+	previousRoot, previousReader, previousUploader, previousBasePath, previousUploads := conf.FileHarbor, reader, uploader, basePath, uploads
 	conf.FileHarbor, reader, uploader, basePath, uploads = t.TempDir(), true, false, "", nil
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads
+		conf.FileHarbor, reader, uploader, basePath, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousUploads
 	})
 	manager := testManager(t)
 	state := newTestState(t)
@@ -149,10 +149,10 @@ func TestReliableUploadRoutesRespectReadOnlyModes(t *testing.T) {
 }
 
 func TestReliableUploadFinalPartLimitMapsToPayloadTooLarge(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads := conf.FileHarbor, reader, uploader, basePath, templateSets, uploads
+	previousRoot, previousReader, previousUploader, previousBasePath, previousUploads := conf.FileHarbor, reader, uploader, basePath, uploads
 	conf.FileHarbor, reader, uploader, basePath, uploads = t.TempDir(), false, false, "", nil
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads
+		conf.FileHarbor, reader, uploader, basePath, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousUploads
 	})
 	manager := testManager(t)
 	router := newTestRouter(t, manager)
@@ -181,10 +181,10 @@ func TestReliableUploadFinalPartLimitMapsToPayloadTooLarge(t *testing.T) {
 }
 
 func TestReliableUploadPartLimitMapsToPayloadTooLarge(t *testing.T) {
-	previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads := conf.FileHarbor, reader, uploader, basePath, templateSets, uploads
+	previousRoot, previousReader, previousUploader, previousBasePath, previousUploads := conf.FileHarbor, reader, uploader, basePath, uploads
 	conf.FileHarbor, reader, uploader, basePath, uploads = t.TempDir(), false, false, "", nil
 	t.Cleanup(func() {
-		conf.FileHarbor, reader, uploader, basePath, templateSets, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousTemplates, previousUploads
+		conf.FileHarbor, reader, uploader, basePath, uploads = previousRoot, previousReader, previousUploader, previousBasePath, previousUploads
 	})
 	manager := testManager(t)
 	router := newTestRouter(t, manager)

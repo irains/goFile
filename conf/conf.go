@@ -4,9 +4,10 @@ import "time"
 
 // Info is the safe, direct-child view of a directory.
 type Info struct {
-	Entries []Entry
-	Files   []File // Kept for compatibility with external template customizations.
-	Dirs    []Dir  // Kept for compatibility with external template customizations.
+	Entries   []Entry
+	Files     []File // Kept for compatibility with external template customizations.
+	Dirs      []Dir  // Kept for compatibility with external template customizations.
+	Truncated bool
 }
 
 // Entry is an item rendered in the file workspace. Version is an optimistic

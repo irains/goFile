@@ -11,5 +11,11 @@ CLAUDE.md
 .env.*
 fileharbor.env
 gofile.env
+
+# React/Vite dependencies and local caches (assets/web is committed generated output).
+web/node_modules/
+web/dist/
+web/.vite/
+web/coverage/
 !.env.example
 !fileharbor.env.example
