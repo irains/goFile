@@ -1,11 +1,14 @@
 import 'ace-builds/css/ace.css';
 import 'ace-builds/css/theme/github_dark.css';
+import 'ace-builds/css/theme/github_light_default.css';
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
+import { useColorScheme } from '@mui/material/styles';
 import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, Button, Chip, Stack, Typography } from '@mui/material';
 import type { FileEntry } from '../api/client';
 import { ApiError, api } from '../api/client';
 import { useI18n } from '../i18n';
+import { aceThemeForMode } from '../theme';
 
 type AceComponent = ComponentType<any>;
 
@@ -34,6 +37,8 @@ function modeFor(name: string) {
 }
 
 export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; writable: boolean; onClose: () => void }) {
+  const { mode } = useColorScheme();
+  const aceTheme = aceThemeForMode(mode);
   const { t } = useI18n();
   const [Ace, setAce] = useState<AceComponent | null>(null);
   const [value, setValue] = useState('');
@@ -68,6 +73,7 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
       return Promise.all([
         import('react-ace'),
         import('ace-builds/src-noconflict/theme-github_dark'),
+        import('ace-builds/src-noconflict/theme-github_light_default'),
         import('ace-builds/src-noconflict/mode-javascript'), import('ace-builds/src-noconflict/mode-typescript'), import('ace-builds/src-noconflict/mode-tsx'),
         import('ace-builds/src-noconflict/mode-json'), import('ace-builds/src-noconflict/mode-markdown'), import('ace-builds/src-noconflict/mode-yaml'),
         import('ace-builds/src-noconflict/mode-sh'), import('ace-builds/src-noconflict/mode-golang'), import('ace-builds/src-noconflict/mode-python'),
@@ -124,7 +130,7 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
     <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Typography noWrap sx={{ flex: 1 }}>{t('editor.title')}: {entry.name}</Typography>{dirty && <Chip size="small" color="warning" label={t('editor.unsaved')} />}</DialogTitle>
     <DialogContent dividers sx={{ p: 0, display: 'flex', flexDirection: 'column' }}>
       {error && <Alert severity={conflicted ? 'warning' : 'error'} action={conflicted ? <Button color="inherit" size="small" onClick={() => void load(true)}>{t('editor.reload')}</Button> : undefined}>{error}</Alert>}
-      {Ace ? <Ace mode={modeFor(entry.name)} theme="github_dark" name={`editor-${entry.path}`} width="100%" height="100%" value={value} readOnly={!writable} onChange={setValue} onLoad={(editor: { focus: () => void }) => editor.focus()} setOptions={{ useWorker: false, showPrintMargin: false, fontSize: 14 }} /> : <Stack alignItems="center" justifyContent="center" sx={{ flex: 1 }}><Typography>{t('upload.hashing')}</Typography></Stack>}
+      {Ace ? <Ace mode={modeFor(entry.name)} theme={aceTheme} name={`editor-${entry.path}`} width="100%" height="100%" value={value} readOnly={!writable} onChange={setValue} onLoad={(editor: { focus: () => void }) => editor.focus()} setOptions={{ useWorker: false, showPrintMargin: false, fontSize: 14 }} /> : <Stack alignItems="center" justifyContent="center" sx={{ flex: 1 }}><Typography>{t('upload.hashing')}</Typography></Stack>}
     </DialogContent>
     <DialogActions><Button onClick={close}>{t('action.close')}</Button>{writable && <Button variant="contained" disabled={saving || !dirty || !version} onClick={() => void save()}>{t('editor.save')}</Button>}</DialogActions>
   </Dialog>;

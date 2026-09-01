@@ -231,6 +231,11 @@ func spaCSP(value string) string {
 	return "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'nonce-" + value + "'; style-src 'self' 'nonce-" + value + "'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:"
 }
 
+func themePrepaint(value string) string {
+	nonce := htmlAttribute(value)
+	return `<script nonce="` + nonce + `">(function(){var mode="dark";try{if(localStorage.getItem("fileharbor-mode")==="light"){mode="light"}}catch(_){ }var root=document.documentElement;root.setAttribute("data-mui-color-scheme",mode);root.style.colorScheme=mode;}());</script><style nonce="` + nonce + `">:root{color-scheme:dark;background:#17171c;color:#eeeef3}:root[data-mui-color-scheme="light"]{color-scheme:light;background:#f8f7fb;color:#211f2a}</style>`
+}
+
 func serveShell(c *gin.Context, bundle *webAssets) {
 	value, err := nonce()
 	if err != nil {
@@ -252,7 +257,7 @@ func serveShell(c *gin.Context, bundle *webAssets) {
 	c.Header("X-Frame-Options", "DENY")
 	c.Header("Cross-Origin-Resource-Policy", "same-origin")
 	c.Writer.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(c.Writer, "<!doctype html><html lang=\""+htmlAttribute(locale)+"\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"fileharbor-base\" content=\""+htmlAttribute(basePath)+"\"><meta name=\"fileharbor-nonce\" content=\""+htmlAttribute(value)+"\"><meta name=\"fileharbor-locale\" content=\""+htmlAttribute(locale)+"\"><meta name=\"fileharbor-login-next\" content=\""+htmlAttribute(loginNext)+"\"><title>FileHarbor</title>")
+	_, _ = fmt.Fprint(c.Writer, "<!doctype html><html lang=\""+htmlAttribute(locale)+"\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"fileharbor-base\" content=\""+htmlAttribute(basePath)+"\"><meta name=\"fileharbor-nonce\" content=\""+htmlAttribute(value)+"\"><meta name=\"fileharbor-locale\" content=\""+htmlAttribute(locale)+"\"><meta name=\"fileharbor-login-next\" content=\""+htmlAttribute(loginNext)+"\"><title>FileHarbor</title>"+themePrepaint(value))
 	for _, style := range styles {
 		_, _ = fmt.Fprint(c.Writer, "<link rel=\"stylesheet\" href=\""+htmlAttribute(webAssetURL(style))+"\">")
 	}

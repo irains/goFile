@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="csrf-token" content="" />
     <meta name="fileharbor-runtime" content="{}" />
+    <script>
+      (() => {
+        let mode = 'dark';
+        try { mode = localStorage.getItem('fileharbor-mode') === 'light' ? 'light' : 'dark'; } catch (_) {}
+        document.documentElement.setAttribute('data-mui-color-scheme', mode);
+        document.documentElement.style.colorScheme = mode;
+      })();
+    </script>
+    <link rel="stylesheet" href="/src/prepaint.css" />
     <title>FileHarbor</title>
   </head>
   <body>

@@ -1,11 +1,14 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Add, Archive, ContentCopy, CreateNewFolder, Delete, Download, Edit, Folder, FolderOpen, MoreVert, Refresh, UploadFile } from '@mui/icons-material';
+import { Add, Archive, ContentCopy, ContentCopyOutlined, CreateNewFolder, DarkModeOutlined, Delete, DeleteOutline, DownloadOutlined, DriveFileMoveOutlined, DriveFileRenameOutline, EditOutlined, Fingerprint, Folder, FolderOpen, FolderZipOutlined, InfoOutlined, LightModeOutlined, MoreVert, Refresh, UnarchiveOutlined, UploadFile, VisibilityOutlined } from '@mui/icons-material';
+import type { SvgIconComponent } from '@mui/icons-material';
 import { Alert, AppBar, Avatar, Box, Breadcrumbs, Button, Checkbox, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Menu, MenuItem, Paper, Snackbar, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Toolbar, Tooltip, Typography, useMediaQuery } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useColorScheme } from '@mui/material/styles';
 import { api, ApiError, type FileEntry, type Properties } from '../api/client';
 import { itemUrl } from '../runtime';
 import { useI18n } from '../i18n';
 import { useSession } from '../session/SessionProvider';
+import { nextThemeMode } from '../theme';
 import { UploadQueueDrawer } from './UploadQueueDrawer';
 
 const LazyEditorDialog = lazy(() => import('../editor/EditorDialog').then((module) => ({ default: module.EditorDialog })));
@@ -36,6 +39,15 @@ export function editorPathFromLocation(location: Pick<Location, 'pathname'> = wi
   } catch {
     return null;
   }
+}
+
+function AppearanceToggle() {
+  const { mode, setMode } = useColorScheme();
+  const { t } = useI18n();
+  if (mode === undefined) return null;
+  const nextMode = nextThemeMode(mode);
+  const label = t(nextMode === 'light' ? 'appearance.switchToLight' : 'appearance.switchToDark');
+  return <Tooltip title={label}><IconButton aria-label={label} onClick={() => setMode(nextMode)}>{nextMode === 'light' ? <LightModeOutlined /> : <DarkModeOutlined />}</IconButton></Tooltip>;
 }
 
 export function Workspace() {
@@ -119,6 +131,7 @@ export function Workspace() {
         <Avatar variant="rounded" sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', width: 32, height: 32, fontWeight: 900 }}>F</Avatar>
         <Typography fontWeight={800} sx={{ mr: 'auto' }}>FileHarbor</Typography>
         <Tooltip title={t('workspace.refresh')}><IconButton aria-label={t('workspace.refresh')} onClick={() => void refresh()}><Refresh /></IconButton></Tooltip>
+        <AppearanceToggle />
         <Button size="small" onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}>{locale === 'en' ? '中文' : 'EN'}</Button>
         <Button variant="text" onClick={() => void signOut()}>{t('app.signOut')}</Button>
       </Toolbar>
@@ -175,18 +188,54 @@ export function Workspace() {
   </Box>;
 }
 
-function EntryMenu({ entry, anchor, onClose, onAction, mutable, editorAvailable }: { entry: FileEntry | null; anchor: HTMLElement | null; onClose: () => void; onAction: (action: string, entry: FileEntry) => void; mutable: boolean; editorAvailable: boolean }) {
+type EntryAction = {
+  name: string;
+  icon: SvgIconComponent;
+  visible: (entry: FileEntry) => boolean;
+  destructive?: boolean;
+};
+
+const entryActions: EntryAction[] = [
+  { name: 'download', icon: DownloadOutlined, visible: (entry) => entry.kind === 'file' },
+  { name: 'preview', icon: VisibilityOutlined, visible: (entry) => entry.kind === 'file' && entry.previewable },
+  { name: 'edit', icon: EditOutlined, visible: (entry) => entry.kind === 'file' },
+  { name: 'properties', icon: InfoOutlined, visible: () => true },
+  { name: 'rename', icon: DriveFileRenameOutline, visible: () => true },
+  { name: 'move', icon: DriveFileMoveOutlined, visible: () => true },
+  { name: 'copy', icon: ContentCopyOutlined, visible: () => true },
+  { name: 'archive', icon: FolderZipOutlined, visible: (entry) => entry.kind === 'directory' },
+  { name: 'extract', icon: UnarchiveOutlined, visible: (entry) => entry.isArchive },
+  { name: 'checksum', icon: Fingerprint, visible: (entry) => entry.kind === 'file' },
+  { name: 'delete', icon: DeleteOutline, visible: () => true, destructive: true }
+];
+
+export function entryMenuActions(entry: FileEntry, mutable: boolean, editorAvailable: boolean) {
+  return entryActions.filter((item) => {
+    if (!item.visible(entry)) return false;
+    if (item.name === 'edit') return editorAvailable;
+    if (item.name === 'properties' || item.name === 'download' || item.name === 'preview') return true;
+    return mutable;
+  });
+}
+
+export function EntryMenu({ entry, anchor, onClose, onAction, mutable, editorAvailable }: { entry: FileEntry | null; anchor: HTMLElement | null; onClose: () => void; onAction: (action: string, entry: FileEntry) => void; mutable: boolean; editorAvailable: boolean }) {
   const { t } = useI18n();
-  const action = (name: string) => { if (entry) onAction(name, entry); };
-  return <Menu anchorEl={anchor} open={Boolean(entry && anchor)} onClose={onClose}>{entry && <Box>
-    {entry.kind === 'file' && <MenuItem onClick={() => action('download')}><ListItemIcon><Download fontSize="small" /></ListItemIcon>{t('action.download')}</MenuItem>}
-    {entry.kind === 'file' && entry.previewable && <MenuItem onClick={() => action('preview')}>{t('action.preview')}</MenuItem>}
-    {entry.kind === 'file' && editorAvailable && <MenuItem onClick={() => action('edit')}><ListItemIcon><Edit fontSize="small" /></ListItemIcon>{t('action.edit')}</MenuItem>}
-    <MenuItem onClick={() => action('properties')}>{t('action.properties')}</MenuItem><Divider />
-    {mutable && <MenuItem onClick={() => action('rename')}>{t('action.rename')}</MenuItem>}{mutable && <MenuItem onClick={() => action('move')}>{t('action.move')}</MenuItem>}{mutable && <MenuItem onClick={() => action('copy')}>{t('action.copy')}</MenuItem>}
-    {mutable && entry.kind === 'directory' && <MenuItem onClick={() => action('archive')}>{t('action.archive')}</MenuItem>}{mutable && entry.isArchive && <MenuItem onClick={() => action('extract')}>{t('action.extract')}</MenuItem>}
-    {mutable && entry.kind === 'file' && <MenuItem onClick={() => action('checksum')}>{t('action.checksum')}</MenuItem>}{mutable && <MenuItem onClick={() => action('delete')} sx={{ color: 'error.main' }}>{t('action.delete')}</MenuItem>}
-  </Box>}</Menu>;
+  if (!entry) return <Menu anchorEl={anchor} open={false} onClose={onClose} />;
+  const visible = entryMenuActions(entry, mutable, editorAvailable);
+  const primary = visible.filter((item) => ['download', 'preview', 'edit', 'properties'].includes(item.name));
+  const mutations = visible.filter((item) => !['download', 'preview', 'edit', 'properties'].includes(item.name));
+  const render = (item: EntryAction) => {
+    const Icon = item.icon;
+    return <MenuItem key={item.name} onClick={() => onAction(item.name, entry)} sx={item.destructive ? { color: 'error.main' } : undefined}>
+      <ListItemIcon sx={item.destructive ? { color: 'inherit' } : undefined}><Icon fontSize="small" /></ListItemIcon>
+      {t(`action.${item.name}`)}
+    </MenuItem>;
+  };
+  return <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={onClose}>
+    {primary.map(render)}
+    {primary.length > 0 && mutations.length > 0 && <Divider />}
+    {mutations.map(render)}
+  </Menu>;
 }
 
 function EntryForm({ state, currentPath, selectedEntries, onClose, onSubmit, onBatchSubmit }: { state: FormState; currentPath: string; selectedEntries: FileEntry[]; onClose: () => void; onSubmit: (endpoint: string, values: Record<string, string>) => void; onBatchSubmit: (endpoint: string, destination?: string) => void }) {

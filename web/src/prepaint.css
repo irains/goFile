@@ -1,0 +1,2 @@
+:root { color-scheme: dark; background: #17171c; color: #eeeef3; }
+:root[data-mui-color-scheme="light"] { color-scheme: light; background: #f8f7fb; color: #211f2a; }

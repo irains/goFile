@@ -31,7 +31,7 @@ export function LoginPage() {
       <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
         <Stack spacing={3} component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
           <Box>
-            <Typography variant="overline" color="primary.light" fontWeight={800} letterSpacing=".13em">FILEHARBOR</Typography>
+            <Typography variant="overline" color="primary.main" fontWeight={800} letterSpacing=".13em">FILEHARBOR</Typography>
             <Typography component="h1" variant="h4" fontWeight={800}>{t('login.title')}</Typography>
             <Typography color="text.secondary" sx={{ mt: 1 }}>{t('login.subtitle')}</Typography>
           </Box>

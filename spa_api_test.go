@@ -39,11 +39,20 @@ func TestEmbeddedSPAShellAndAssets(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", header, got, want)
 		}
 	}
+	body := response.Body.String()
 	if csp := response.Header().Get("Content-Security-Policy"); csp == "" || !bytes.Contains([]byte(csp), []byte("style-src 'self' 'nonce-")) {
 		t.Fatalf("shell CSP = %q", csp)
 	}
 	if !bytes.Contains(response.Body.Bytes(), []byte("/fileharbor/assets/"+entryAsset)) || bytes.Contains(response.Body.Bytes(), []byte("fileharbor-csrf")) || !bytes.Contains(response.Body.Bytes(), []byte("fileharbor-nonce")) || !bytes.Contains(response.Body.Bytes(), []byte("fileharbor-login-next")) {
 		t.Fatalf("shell metadata or embedded asset reference is invalid: %s", response.Body.String())
+	}
+	if !strings.Contains(body, `localStorage.getItem("fileharbor-mode")`) || !strings.Contains(body, `data-mui-color-scheme`) || !strings.Contains(body, `nonce="`) {
+		t.Fatalf("shell theme bootstrap is invalid: %s", body)
+	}
+	prepaint := strings.Index(body, `localStorage.getItem("fileharbor-mode")`)
+	asset := strings.Index(body, "/fileharbor/assets/")
+	if prepaint == -1 || asset == -1 || prepaint > asset {
+		t.Fatalf("theme bootstrap must precede external assets: %s", body)
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/fileharbor/assets/"+entryAsset, nil)
