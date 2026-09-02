@@ -233,7 +233,7 @@ func spaCSP(value string) string {
 
 func themePrepaint(value string) string {
 	nonce := htmlAttribute(value)
-	return `<script nonce="` + nonce + `">(function(){var mode="dark";try{if(localStorage.getItem("fileharbor-mode")==="light"){mode="light"}}catch(_){ }var root=document.documentElement;root.setAttribute("data-mui-color-scheme",mode);root.style.colorScheme=mode;}());</script><style nonce="` + nonce + `">:root{color-scheme:dark;background:#17171c;color:#eeeef3}:root[data-mui-color-scheme="light"]{color-scheme:light;background:#f8f7fb;color:#211f2a}</style>`
+	return `<script nonce="` + nonce + `">(function(){var mode="system";var resolved="light";try{var raw=localStorage.getItem("fileharbor-mode");if(raw==="light"||raw==="dark"||raw==="system"){mode=raw}}catch(_){ }if(mode==="light"){resolved="light"}else if(mode==="dark"){resolved="dark"}else{resolved=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light"}var root=document.documentElement;root.setAttribute("data-mui-color-scheme",resolved);root.style.colorScheme=resolved;}());</script><style nonce="` + nonce + `">:root{color-scheme:dark;background:#17171c;color:#eeeef3}:root[data-mui-color-scheme="light"]{color-scheme:light;background:#f8f7fb;color:#211f2a}</style>`
 }
 
 func serveShell(c *gin.Context, bundle *webAssets) {

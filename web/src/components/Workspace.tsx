@@ -1,22 +1,77 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
-import { Add, Archive, ContentCopy, ContentCopyOutlined, CreateNewFolder, DarkModeOutlined, Delete, DeleteOutline, DownloadOutlined, DriveFileMoveOutlined, DriveFileRenameOutline, EditOutlined, Fingerprint, Folder, FolderOpen, FolderZipOutlined, InfoOutlined, LightModeOutlined, MoreVert, Refresh, UnarchiveOutlined, UploadFile, VisibilityOutlined } from '@mui/icons-material';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import {
+  Add,
+  Archive,
+  ContentCopy,
+  CreateNewFolder,
+  DarkModeOutlined,
+  Delete,
+  DescriptionOutlined,
+  DesktopWindowsOutlined,
+  DownloadOutlined,
+  Folder,
+  FolderOffOutlined,
+  FolderOpen,
+  InfoOutlined,
+  LightModeOutlined,
+  LogoutOutlined,
+  MoreVert,
+  Refresh,
+  Translate,
+  UploadFile
+} from '@mui/icons-material';
 import type { SvgIconComponent } from '@mui/icons-material';
-import { Alert, AppBar, Avatar, Box, Breadcrumbs, Button, Checkbox, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Menu, MenuItem, Paper, Snackbar, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Toolbar, Tooltip, Typography, useMediaQuery } from '@mui/material';
+import {
+  Alert,
+  AppBar,
+  Box,
+  Breadcrumbs,
+  Button,
+  Checkbox,
+  Chip,
+  CircularProgress,
+  Divider,
+  IconButton,
+  ListItemIcon,
+  Menu,
+  MenuItem,
+  Paper,
+  Skeleton,
+  Snackbar,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Toolbar,
+  Tooltip,
+  Typography,
+  useMediaQuery
+} from '@mui/material';
+import { useColorScheme, useTheme } from '@mui/material/styles';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useColorScheme } from '@mui/material/styles';
 import { api, ApiError, type FileEntry, type Properties } from '../api/client';
 import { itemUrl } from '../runtime';
 import { useI18n } from '../i18n';
 import { useSession } from '../session/SessionProvider';
-import { nextThemeMode } from '../theme';
+import { Mark } from './Mark';
+import { DialogShell } from './DialogShell';
+import { SidePanel } from './SidePanel';
+import { EmptyState } from './EmptyState';
 import { UploadQueueDrawer } from './UploadQueueDrawer';
+import { nextThemeMode, type ThemeMode } from '../theme';
+import { entryMenuActions, hoverActionNames, type EntryAction, type EntryActionName } from './entryActions';
+import { surface } from '../tokens';
 
 const LazyEditorDialog = lazy(() => import('../editor/EditorDialog').then((module) => ({ default: module.EditorDialog })));
 type FormAction = 'newdir' | 'newfile' | 'rename' | 'move' | 'copy';
 type FormState = { action: FormAction; entry?: FileEntry } | null;
 
 const fmtBytes = (value: number) => new Intl.NumberFormat(undefined, { style: 'unit', unit: 'byte', notation: value > 1_000_000 ? 'compact' : 'standard', unitDisplay: 'narrow' }).format(value);
-const fmtDate = (value: string) => value ? new Date(value).toLocaleString() : '—';
+const fmtDate = (value: string | number) => value ? new Date(value).toLocaleString() : '—';
 const navigateDirectory = (path: string) => { window.location.assign(itemUrl('d', path)); };
 
 function directoryPathFromLocation(): string {
@@ -45,12 +100,55 @@ function AppearanceToggle() {
   const { mode, setMode } = useColorScheme();
   const { t } = useI18n();
   if (mode === undefined) return null;
-  const nextMode = nextThemeMode(mode);
-  const label = t(nextMode === 'light' ? 'appearance.switchToLight' : 'appearance.switchToDark');
-  return <Tooltip title={label}><IconButton aria-label={label} onClick={() => setMode(nextMode)}>{nextMode === 'light' ? <LightModeOutlined /> : <DarkModeOutlined />}</IconButton></Tooltip>;
+  const intent = mode as ThemeMode;
+  const next = nextThemeMode(intent);
+  const labelMap: Record<ThemeMode, string> = { light: t('appearance.switchToLight'), dark: t('appearance.switchToDark'), system: t('appearance.switchToSystem') };
+  const label = labelMap[next];
+  const Icon: SvgIconComponent = next === 'light' ? LightModeOutlined : next === 'dark' ? DarkModeOutlined : DesktopWindowsOutlined;
+  return (
+    <Tooltip title={label}>
+      <IconButton aria-label={label} onClick={() => setMode(next)}>
+        <Icon />
+      </IconButton>
+    </Tooltip>
+  );
+}
+
+function RowActions({ entry, onAction, onMenu }: { entry: FileEntry; onAction: (name: EntryActionName) => void; onMenu: (event: React.MouseEvent<HTMLElement>) => void }) {
+  const { t } = useI18n();
+  const visible = hoverActionNames.filter((name) => {
+    const action = entryMenuActions(entry, true, true).find((item) => item.name === name);
+    return Boolean(action);
+  });
+  return (
+    <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end" sx={(theme) => ({
+      opacity: 0,
+      transition: theme.transitions.create('opacity', { duration: theme.transitions.duration.short }),
+      '&:hover, &:focus-within': { opacity: 1 },
+      '@media (hover: none)': { opacity: 1 }
+    })}>
+      {visible.map((name) => {
+        const Icon = name === 'download' ? DownloadOutlined : InfoOutlined;
+        const label = t(`action.${name}`);
+        return (
+          <Tooltip key={name} title={label}>
+            <IconButton size="small" aria-label={`${label} ${entry.name}`} onClick={() => onAction(name)}>
+              <Icon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        );
+      })}
+      <Tooltip title={t('workspace.actions')}>
+        <IconButton size="small" aria-label={`${t('workspace.actions')} ${entry.name}`} onClick={onMenu}>
+          <MoreVert fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    </Stack>
+  );
 }
 
 export function Workspace() {
+  const theme = useTheme();
   const { t, locale, setLocale } = useI18n();
   const { session, logout } = useSession();
   const queryClient = useQueryClient();
@@ -63,7 +161,8 @@ export function Workspace() {
   const editorPath = editorPathFromLocation();
   const [showUploads, setShowUploads] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const compact = useMediaQuery('(max-width: 760px)');
+  const [pendingDelete, setPendingDelete] = useState<{ type: 'single'; entry: FileEntry } | { type: 'batch'; entries: FileEntry[] } | null>(null);
+  const compact = useMediaQuery(theme.breakpoints.down('md'));
   const currentPath = directoryPathFromLocation();
   const listingQuery = useQuery({ queryKey: ['listing', currentPath], queryFn: () => api.getListing(currentPath) });
   const listing = listingQuery.data;
@@ -105,7 +204,7 @@ export function Workspace() {
   const selectedEntries = entries.filter((entry) => selected.has(entry.path));
   const batchBody = (destination?: string) => ({ listing_token: listing?.listingToken, entries: selectedEntries.map(({ name, version }) => ({ name, version })), ...(destination !== undefined ? { destination } : {}) });
   const doBatch = (endpoint: string, destination?: string) => { if (listing?.listingToken && selectedEntries.length) batch.mutate({ endpoint, body: batchBody(destination) }); };
-  const performEntryAction = (action: string, entry: FileEntry) => {
+  const performEntryAction = (action: EntryActionName, entry: FileEntry) => {
     setMenuEntry(null); setMenuAnchor(null);
     if (action === 'properties') return setPropertiesFor(entry);
     if (action === 'edit') return setEditorFor(entry);
@@ -113,41 +212,94 @@ export function Workspace() {
     if (action === 'preview') return window.location.assign(itemUrl('view', entry.path));
     if (action === 'rename') return setForm({ action: 'rename', entry });
     if (action === 'move' || action === 'copy') return setForm({ action, entry });
-    const endpoints: Record<string, string> = { delete: 'do/rm', archive: 'do/zip', extract: 'do/unzip', checksum: 'do/md5' };
-    if (action === 'delete' && !window.confirm(t('dialog.deleteText'))) return;
-    mutation.mutate({ endpoint: endpoints[action], values: { path: entry.path } });
+    if (action === 'delete') return setPendingDelete({ type: 'single', entry });
+    const endpoints: Record<string, string> = { archive: 'do/zip', extract: 'do/unzip', checksum: 'do/md5' };
+    if (action in endpoints) mutation.mutate({ endpoint: endpoints[action], values: { path: entry.path } });
   };
   const signOut = async () => {
     try { await logout(); window.location.assign(itemUrl('d', '')); }
     catch (error) { setMessage(error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic')); }
   };
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    if (pendingDelete.type === 'single') {
+      mutation.mutate({ endpoint: 'do/rm', values: { path: pendingDelete.entry.path } });
+    } else {
+      doBatch('do/batch/delete');
+    }
+    setPendingDelete(null);
+  };
 
-  if (listingQuery.isLoading) return <Stack component="main" alignItems="center" justifyContent="center" sx={{ minHeight: '100dvh' }}><CircularProgress /></Stack>;
-  if (listingQuery.isError || !listing) return <Box component="main" sx={{ p: 4 }}><Alert severity="error">{listingQuery.error instanceof ApiError ? t(`error.${listingQuery.error.code}`) : t('error.generic')}</Alert><Button sx={{ mt: 2 }} onClick={() => void listingQuery.refetch()}>{t('workspace.refresh')}</Button></Box>;
+  const breadcrumbs = useMemo(() => {
+    const segments = listing ? listing.path.split('/').filter(Boolean) : [];
+    return segments;
+  }, [listing]);
+
+  if (listingQuery.isLoading) return (
+    <Stack component="main" sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
+      <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+        <Toolbar sx={{ gap: 1.5, px: { xs: 2, sm: 3 } }}>
+          <Mark size={24} color="currentColor" />
+          <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
+        </Toolbar>
+      </AppBar>
+      <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, sm: 3 }, py: 3, width: '100%' }}>
+        <Skeleton variant="text" sx={{ width: 240, height: 36 }} />
+        <Skeleton variant="text" sx={{ width: 160, height: 20, mt: 1 }} />
+        <TableContainer component={Paper} sx={{ ...surface, mt: 3 }}>
+          <Table>
+            <TableBody>{Array.from({ length: 5 }).map((_entry, index) => (
+              <TableRow key={index}><TableCell><Skeleton variant="text" sx={{ width: '60%' }} /></TableCell><TableCell><Skeleton variant="text" sx={{ width: '40%' }} /></TableCell><TableCell><Skeleton variant="text" sx={{ width: '30%' }} /></TableCell><TableCell /></TableRow>
+            ))}</TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    </Stack>
+  );
+
+  if (listingQuery.isError || !listing) return (
+    <Stack component="main" alignItems="center" justifyContent="center" sx={{ minHeight: '100dvh', p: 4, bgcolor: 'background.default' }}>
+      <Paper sx={{ ...surface, p: { xs: 3, sm: 4 }, maxWidth: 480 }}>
+        <Stack spacing={2}>
+          <Alert severity="error">{listingQuery.error instanceof ApiError ? t(`error.${listingQuery.error.code}`) : t('error.generic')}</Alert>
+          <Stack direction="row" spacing={1}>
+            <Button variant="contained" onClick={() => void listingQuery.refetch()}>{t('action.retry')}</Button>
+            <Button onClick={() => window.location.reload()}>{t('workspace.refresh')}</Button>
+          </Stack>
+        </Stack>
+      </Paper>
+    </Stack>
+  );
 
   return <Box component="main" sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
     <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
-      <Toolbar sx={{ gap: 1.5, px: { xs: 2, sm: 3 } }}>
-        <Avatar variant="rounded" sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', width: 32, height: 32, fontWeight: 900 }}>F</Avatar>
-        <Typography fontWeight={800} sx={{ mr: 'auto' }}>FileHarbor</Typography>
+      <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
+        <Mark size={22} color="primary" />
+        <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
         <Tooltip title={t('workspace.refresh')}><IconButton aria-label={t('workspace.refresh')} onClick={() => void refresh()}><Refresh /></IconButton></Tooltip>
         <AppearanceToggle />
-        <Button size="small" onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}>{locale === 'en' ? '中文' : 'EN'}</Button>
-        <Button variant="text" onClick={() => void signOut()}>{t('app.signOut')}</Button>
+        <Tooltip title={locale === 'en' ? '中文' : 'English'}>
+          <IconButton aria-label="Toggle language" onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}><Translate /></IconButton>
+        </Tooltip>
+        <Tooltip title={t('app.signOut')}>
+          <IconButton aria-label={t('app.signOut')} onClick={() => void signOut()}><LogoutOutlined /></IconButton>
+        </Tooltip>
       </Toolbar>
     </AppBar>
     <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, sm: 3 }, py: 3 }}>
       <Stack spacing={2.5}>
         <Box sx={{ display: 'flex', alignItems: { sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
           <Box sx={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}>
-            <Typography component="h1" variant="h5" fontWeight={800}>{t('app.workspace')}</Typography>
+            <Typography component="h1" variant="display">{t('app.workspace')}</Typography>
             <Breadcrumbs aria-label="breadcrumb" sx={{ mt: .5, overflow: 'hidden' }}>
-              <Button onClick={() => navigateDirectory('')} size="small">{t('workspace.root')}</Button>
-              {listing.path.split('/').filter(Boolean).map((segment, index, all) => <Button onClick={() => navigateDirectory(all.slice(0, index + 1).join('/'))} size="small" key={`${segment}-${index}`}>{segment}</Button>)}
+              <Button onClick={() => navigateDirectory('')} size="small" sx={{ minWidth: 0, p: 0.5 }}>{t('workspace.root')}</Button>
+              {breadcrumbs.map((segment, index, all) => (
+                <Button onClick={() => navigateDirectory(all.slice(0, index + 1).join('/'))} size="small" key={`${segment}-${index}`} sx={{ minWidth: 0, p: 0.5 }}>{segment}</Button>
+              ))}
             </Breadcrumbs>
           </Box>
-          {!mutable && canUpload && <Chip label={t('workspace.uploadsOnly')} color="info" />}
-          {!mutable && !canUpload && <Chip label={t('workspace.readOnly')} />}
+          {!mutable && canUpload && <Chip label={t('workspace.uploadsOnly')} color="info" variant="outlined" />}
+          {!mutable && !canUpload && <Chip label={t('workspace.readOnly')} variant="outlined" />}
           {mutable && <Stack direction="row" flexWrap="wrap" gap={1}>
             <Button startIcon={<CreateNewFolder />} variant="outlined" onClick={() => setForm({ action: 'newdir' })}>{t('workspace.newFolder')}</Button>
             {!compact && <Button startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>}
@@ -155,25 +307,71 @@ export function Workspace() {
           {canUpload && <Button startIcon={<UploadFile />} variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button>}
         </Box>
         {listing.truncated && <Alert severity="warning">{t('workspace.truncated')}</Alert>}
-        {selectedEntries.length > 0 && <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', p: 1.25, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography fontWeight={700} sx={{ mr: 1 }}>{t('workspace.selected', { count: selectedEntries.length })}</Typography>
+        {selectedEntries.length > 0 && <Paper sx={{ ...surface, p: 1.25, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <Typography variant="bodyStrong" sx={{ mr: 1 }}>{t('workspace.selected', { count: selectedEntries.length })}</Typography>
           {mutable && <Button size="small" startIcon={<Folder />} onClick={() => setForm({ action: 'move' })}>{t('action.move')}</Button>}
           {mutable && <Button size="small" startIcon={<ContentCopy />} onClick={() => setForm({ action: 'copy' })}>{t('action.copy')}</Button>}
-          {mutable && <Button size="small" color="error" startIcon={<Delete />} onClick={() => { if (window.confirm(t('dialog.deleteText'))) doBatch('do/batch/delete'); }}>{t('action.delete')}</Button>}
+          {mutable && <Button size="small" color="error" startIcon={<Delete />} onClick={() => setPendingDelete({ type: 'batch', entries: selectedEntries })}>{t('action.delete')}</Button>}
           <Button size="small" startIcon={<Archive />} onClick={() => doBatch('do/batch/download-zip')}>{t('action.batchDownload')}</Button>
           <Button size="small" onClick={() => setSelected(new Set())}>{t('action.cancel')}</Button>
         </Paper>}
-        <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
+        <TableContainer component={Paper} sx={surface}>
           <Table stickyHeader size={compact ? 'small' : 'medium'} aria-label={t('app.workspace')}>
-            <TableHead><TableRow><TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectAll')} checked={entries.length > 0 && selected.size === entries.length} indeterminate={selected.size > 0 && selected.size < entries.length} onChange={(event) => setSelected(event.target.checked ? new Set(entries.map((entry) => entry.path)) : new Set())} /></TableCell><TableCell>{t('workspace.name')}</TableCell>{!compact && <TableCell>{t('workspace.size')}</TableCell>}{!compact && <TableCell>{t('workspace.modified')}</TableCell>}<TableCell align="right">{t('workspace.actions')}</TableCell></TableRow></TableHead>
+            <TableHead><TableRow>
+              <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectAll')} checked={entries.length > 0 && selected.size === entries.length} indeterminate={selected.size > 0 && selected.size < entries.length} onChange={(event) => setSelected(event.target.checked ? new Set(entries.map((entry) => entry.path)) : new Set())} /></TableCell>
+              <TableCell>{t('workspace.name')}</TableCell>
+              {!compact && <TableCell>{t('workspace.size')}</TableCell>}
+              {!compact && <TableCell>{t('workspace.modified')}</TableCell>}
+              <TableCell align="right" sx={{ width: 160 }}>{t('workspace.actions')}</TableCell>
+            </TableRow></TableHead>
             <TableBody>
               {listing.parentPath !== null && <TableRow hover><TableCell padding="checkbox" /><TableCell colSpan={compact ? 2 : 4}><Button startIcon={<FolderOpen />} onClick={() => navigateDirectory(listing.parentPath!)} sx={{ justifyContent: 'flex-start' }}>..</Button></TableCell></TableRow>}
-              {entries.length ? entries.map((entry) => <TableRow hover key={entry.path} selected={selected.has(entry.path)}>
-                <TableCell padding="checkbox"><Checkbox checked={selected.has(entry.path)} onChange={(event) => select(entry, event.target.checked)} /></TableCell>
-                <TableCell sx={{ maxWidth: 0 }}><Stack direction="row" spacing={1.25} alignItems="center"><ListItemIcon sx={{ minWidth: 28, color: entry.kind === 'directory' ? 'primary.light' : 'text.secondary' }}>{entry.kind === 'directory' ? <Folder /> : <FolderOpen />}</ListItemIcon><Box sx={{ minWidth: 0 }}><Typography component="button" type="button" onClick={() => entry.kind === 'directory' ? navigateDirectory(entry.path) : window.location.assign(itemUrl('download', entry.path))} color="inherit" fontWeight={entry.kind === 'directory' ? 700 : 500} sx={{ appearance: 'none', background: 'none', border: 0, p: 0, textAlign: 'left', cursor: 'pointer', font: 'inherit', '&:hover': { textDecoration: 'underline' }, overflowWrap: 'anywhere' }}>{entry.name}</Typography>{compact && <Typography variant="caption" color="text.secondary">{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : t('properties.type')} · {fmtDate(entry.modifiedAt)}</Typography>}</Box></Stack></TableCell>
-                {!compact && <TableCell>{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : '—'}</TableCell>}{!compact && <TableCell>{fmtDate(entry.modifiedAt)}</TableCell>}
-                <TableCell align="right"><IconButton aria-label={`${t('workspace.actions')} ${entry.name}`} onClick={(event) => { setMenuEntry(entry); setMenuAnchor(event.currentTarget); }}><MoreVert /></IconButton></TableCell>
-              </TableRow>) : listing.parentPath === null && <TableRow><TableCell colSpan={compact ? 3 : 5}><Box sx={{ py: 8, textAlign: 'center' }}><FolderOpen color="disabled" sx={{ fontSize: 44 }} /><Typography color="text.secondary">{t('workspace.empty')}</Typography></Box></TableCell></TableRow>}
+              {entries.map((entry) => (
+                <TableRow hover key={entry.path} selected={selected.has(entry.path)}>
+                  <TableCell padding="checkbox"><Checkbox checked={selected.has(entry.path)} onChange={(event) => select(entry, event.target.checked)} /></TableCell>
+                  <TableCell sx={{ maxWidth: 0 }}>
+                    <Stack direction="row" spacing={1.25} alignItems="center">
+                      <ListItemIcon sx={{ minWidth: 28, color: entry.kind === 'directory' ? 'primary.light' : 'text.secondary' }}>
+                        {entry.kind === 'directory' ? <Folder /> : <DescriptionOutlined />}
+                      </ListItemIcon>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography
+                          component="button"
+                          type="button"
+                          onClick={() => entry.kind === 'directory' ? navigateDirectory(entry.path) : window.location.assign(itemUrl('download', entry.path))}
+                          color="inherit"
+                          fontWeight={entry.kind === 'directory' ? 700 : 500}
+                          sx={{ appearance: 'none', background: 'none', border: 0, p: 0, textAlign: 'left', cursor: 'pointer', font: 'inherit', overflowWrap: 'anywhere' }}
+                        >
+                          {entry.name}
+                        </Typography>
+                        {compact && <Typography variant="caption" color="text.secondary" component="div">{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : t('properties.type')} · {fmtDate(entry.modifiedAt)}</Typography>}
+                      </Box>
+                    </Stack>
+                  </TableCell>
+                  {!compact && <TableCell>{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : '—'}</TableCell>}
+                  {!compact && <TableCell>{fmtDate(entry.modifiedAt)}</TableCell>}
+                  <TableCell align="right" sx={{ width: 160 }}>
+                    <RowActions
+                      entry={entry}
+                      onAction={(name) => performEntryAction(name, entry)}
+                      onMenu={(event) => { setMenuEntry(entry); setMenuAnchor(event.currentTarget); }}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+              {entries.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={compact ? 3 : 5}>
+                    <EmptyState
+                      icon={<FolderOffOutlined />}
+                      title={t('workspace.emptyTitle')}
+                      caption={t('workspace.emptyHint')}
+                      action={canUpload ? <Button variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button> : undefined}
+                    />
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </TableContainer>
@@ -184,58 +382,44 @@ export function Workspace() {
     <PropertiesDialog entry={propertiesFor} properties={propertyQuery.data?.properties} isLoading={propertyQuery.isLoading} onClose={() => setPropertiesFor(null)} />
     {activeEditor && <Suspense fallback={<CircularProgress />}><LazyEditorDialog entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={() => { setEditorFor(null); if (editorPath) window.location.assign(itemUrl('d', '')); }} /></Suspense>}
     {canUpload && <UploadQueueDrawer open={showUploads} onClose={() => setShowUploads(false)} destination={listing.path} username={session?.username ?? ''} onAllComplete={() => void refresh()} />}
-    <Snackbar open={Boolean(message)} autoHideDuration={6000} onClose={() => setMessage(null)}><Alert severity="error" onClose={() => setMessage(null)}>{message}</Alert></Snackbar>
+    <DialogShell
+      open={Boolean(pendingDelete)}
+      onClose={() => setPendingDelete(null)}
+      title={pendingDelete?.type === 'batch'
+        ? t('dialog.confirmDeleteBatch', { count: pendingDelete.entries.length })
+        : t('dialog.confirmDelete', { name: pendingDelete?.type === 'single' ? pendingDelete.entry.name : '' })}
+      confirmLabel={t('action.delete')}
+      confirmTone="destructive"
+      onConfirm={confirmDelete}
+    >
+      <Typography color="text.secondary">{t('dialog.deleteText')}</Typography>
+    </DialogShell>
+    <Snackbar open={Boolean(message)} autoHideDuration={6000} onClose={() => setMessage(null)}><Alert severity="error" variant="filled" onClose={() => setMessage(null)}>{message}</Alert></Snackbar>
   </Box>;
 }
 
-type EntryAction = {
-  name: string;
-  icon: SvgIconComponent;
-  visible: (entry: FileEntry) => boolean;
-  destructive?: boolean;
-};
-
-const entryActions: EntryAction[] = [
-  { name: 'download', icon: DownloadOutlined, visible: (entry) => entry.kind === 'file' },
-  { name: 'preview', icon: VisibilityOutlined, visible: (entry) => entry.kind === 'file' && entry.previewable },
-  { name: 'edit', icon: EditOutlined, visible: (entry) => entry.kind === 'file' },
-  { name: 'properties', icon: InfoOutlined, visible: () => true },
-  { name: 'rename', icon: DriveFileRenameOutline, visible: () => true },
-  { name: 'move', icon: DriveFileMoveOutlined, visible: () => true },
-  { name: 'copy', icon: ContentCopyOutlined, visible: () => true },
-  { name: 'archive', icon: FolderZipOutlined, visible: (entry) => entry.kind === 'directory' },
-  { name: 'extract', icon: UnarchiveOutlined, visible: (entry) => entry.isArchive },
-  { name: 'checksum', icon: Fingerprint, visible: (entry) => entry.kind === 'file' },
-  { name: 'delete', icon: DeleteOutline, visible: () => true, destructive: true }
-];
-
-export function entryMenuActions(entry: FileEntry, mutable: boolean, editorAvailable: boolean) {
-  return entryActions.filter((item) => {
-    if (!item.visible(entry)) return false;
-    if (item.name === 'edit') return editorAvailable;
-    if (item.name === 'properties' || item.name === 'download' || item.name === 'preview') return true;
-    return mutable;
-  });
-}
-
-export function EntryMenu({ entry, anchor, onClose, onAction, mutable, editorAvailable }: { entry: FileEntry | null; anchor: HTMLElement | null; onClose: () => void; onAction: (action: string, entry: FileEntry) => void; mutable: boolean; editorAvailable: boolean }) {
+export function EntryMenu({ entry, anchor, onClose, onAction, mutable, editorAvailable }: { entry: FileEntry | null; anchor: HTMLElement | null; onClose: () => void; onAction: (action: EntryActionName, entry: FileEntry) => void; mutable: boolean; editorAvailable: boolean }) {
   const { t } = useI18n();
   if (!entry) return <Menu anchorEl={anchor} open={false} onClose={onClose} />;
   const visible = entryMenuActions(entry, mutable, editorAvailable);
-  const primary = visible.filter((item) => ['download', 'preview', 'edit', 'properties'].includes(item.name));
-  const mutations = visible.filter((item) => !['download', 'preview', 'edit', 'properties'].includes(item.name));
+  const primary = visible.filter((item) => !item.destructive && ['download', 'preview', 'edit', 'properties', 'rename', 'move', 'copy', 'archive', 'extract', 'checksum'].includes(item.name));
+  const destructive = visible.filter((item) => item.destructive);
   const render = (item: EntryAction) => {
     const Icon = item.icon;
-    return <MenuItem key={item.name} onClick={() => onAction(item.name, entry)} sx={item.destructive ? { color: 'error.main' } : undefined}>
-      <ListItemIcon sx={item.destructive ? { color: 'inherit' } : undefined}><Icon fontSize="small" /></ListItemIcon>
-      {t(`action.${item.name}`)}
-    </MenuItem>;
+    return (
+      <MenuItem key={item.name} onClick={() => onAction(item.name, entry)} sx={item.destructive ? { color: 'error.main' } : undefined}>
+        <ListItemIcon sx={item.destructive ? { color: 'inherit' } : undefined}><Icon fontSize="small" /></ListItemIcon>
+        {t(`action.${item.name}`)}
+      </MenuItem>
+    );
   };
-  return <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={onClose}>
-    {primary.map(render)}
-    {primary.length > 0 && mutations.length > 0 && <Divider />}
-    {mutations.map(render)}
-  </Menu>;
+  return (
+    <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={onClose}>
+      {primary.map(render)}
+      {primary.length > 0 && destructive.length > 0 && <Divider />}
+      {destructive.map(render)}
+    </Menu>
+  );
 }
 
 function EntryForm({ state, currentPath, selectedEntries, onClose, onSubmit, onBatchSubmit }: { state: FormState; currentPath: string; selectedEntries: FileEntry[]; onClose: () => void; onSubmit: (endpoint: string, values: Record<string, string>) => void; onBatchSubmit: (endpoint: string, destination?: string) => void }) {
@@ -252,19 +436,61 @@ function EntryForm({ state, currentPath, selectedEntries, onClose, onSubmit, onB
     else if (state.entry) onSubmit(`do/${state.action}`, { path: state.entry.path, destination, ...(value && value !== state.entry.name ? { name: value } : {}) });
     onClose();
   };
-  return <Dialog open onClose={onClose} fullWidth maxWidth="xs"><DialogTitle>{title[state.action]}</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}>
-    {!isMultiple && <TextField autoFocus fullWidth required label={state.action === 'newdir' ? t('dialog.folderName') : state.action === 'newfile' ? t('dialog.fileName') : t('dialog.newName')} value={value} onChange={(event) => setValue(event.target.value)} />}
-    {(state.action === 'move' || state.action === 'copy') && <TextField fullWidth label={t('dialog.destination')} value={destination || t('workspace.root')} InputProps={{ readOnly: true, endAdornment: <Button onClick={() => setPicker(true)}>{t('action.chooseFolder')}</Button> }} />}
-    {isMultiple && <Typography>{t('workspace.selected', { count: selectedEntries.length })}</Typography>}
-  </Stack></DialogContent><DialogActions><Button onClick={onClose}>{t('action.cancel')}</Button><Button variant="contained" disabled={(!isMultiple && !value.trim()) || ((state.action === 'move' || state.action === 'copy') && destination === currentPath)} onClick={submit}>{t('action.confirm')}</Button></DialogActions><FolderPicker open={picker} initialPath={destination} onClose={() => setPicker(false)} onChoose={(path) => { setDestination(path); setPicker(false); }} /></Dialog>;
+  return (
+    <DialogShell open onClose={onClose} title={title[state.action]} onConfirm={submit} confirmDisabled={(!isMultiple && !value.trim()) || ((state.action === 'move' || state.action === 'copy') && destination === currentPath)}>
+      {!isMultiple && <TextField autoFocus fullWidth required label={state.action === 'newdir' ? t('dialog.folderName') : state.action === 'newfile' ? t('dialog.fileName') : t('dialog.newName')} value={value} onChange={(event) => setValue(event.target.value)} />}
+      {(state.action === 'move' || state.action === 'copy') && <TextField fullWidth label={t('dialog.destination')} value={destination || t('workspace.root')} InputProps={{ readOnly: true, endAdornment: <Button onClick={() => setPicker(true)}>{t('action.chooseFolder')}</Button> }} />}
+      {isMultiple && <Typography color="text.secondary">{t('workspace.selected', { count: selectedEntries.length })}</Typography>}
+      <FolderPicker open={picker} initialPath={destination} onClose={() => setPicker(false)} onChoose={(path) => { setDestination(path); setPicker(false); }} />
+    </DialogShell>
+  );
 }
 
 function FolderPicker({ open, initialPath, onClose, onChoose }: { open: boolean; initialPath: string; onClose: () => void; onChoose: (path: string) => void }) {
   const { t } = useI18n(); const [path, setPath] = useState(initialPath); const query = useQuery({ queryKey: ['directories', path], queryFn: () => api.getDirectories(path), enabled: open });
   useEffect(() => { if (open) setPath(initialPath); }, [open, initialPath]);
-  return <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs"><DialogTitle>{t('dialog.destination')}</DialogTitle><DialogContent><Breadcrumbs sx={{ my: 1 }}><Button onClick={() => setPath('')}>{t('workspace.root')}</Button>{path.split('/').filter(Boolean).map((part, index, all) => <Button key={`${part}-${index}`} onClick={() => setPath(all.slice(0, index + 1).join('/'))}>{part}</Button>)}</Breadcrumbs><List dense>{query.isLoading && <CircularProgress size={24} />}{query.data?.dirs.map((dir) => <ListItemButton key={dir.path} onClick={() => setPath(dir.path)}><ListItemIcon><Folder color="primary" /></ListItemIcon><ListItemText primary={dir.name} /></ListItemButton>)}</List></DialogContent><DialogActions><Button onClick={onClose}>{t('action.cancel')}</Button><Button variant="contained" onClick={() => onChoose(path)}>{t('action.chooseFolder')}</Button></DialogActions></Dialog>;
+  return (
+    <DialogShell open={open} onClose={onClose} title={t('dialog.destination')} onConfirm={() => onChoose(path)} confirmDisabled={path === initialPath}>
+      <Breadcrumbs sx={{ my: 1 }}>
+        <Button onClick={() => setPath('')} size="small">{t('workspace.root')}</Button>
+        {path.split('/').filter(Boolean).map((part, index, all) => (
+          <Button key={`${part}-${index}`} onClick={() => setPath(all.slice(0, index + 1).join('/'))} size="small">{part}</Button>
+        ))}
+      </Breadcrumbs>
+      <Box sx={{ minHeight: 200, border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1, overflow: 'auto', maxHeight: 300 }}>
+        {query.isLoading && <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 120 }}><CircularProgress size={24} /></Stack>}
+        {query.data?.dirs.map((dir) => (
+          <Button key={dir.path} onClick={() => setPath(dir.path)} fullWidth sx={{ justifyContent: 'flex-start' }} startIcon={<Folder color="primary" />}>{dir.name}</Button>
+        ))}
+      </Box>
+    </DialogShell>
+  );
+}
+
+function DefinitionRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ py: 1, borderBottom: '1px solid', borderColor: 'divider' }} spacing={2}>
+      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{label}</Typography>
+      <Typography variant="body" sx={{ fontFamily: mono ? 'fontFamilyMono' : undefined, overflowWrap: 'anywhere', textAlign: 'right', minWidth: 0 }}>{value || '—'}</Typography>
+    </Stack>
+  );
 }
 
 function PropertiesDialog({ entry, properties, isLoading, onClose }: { entry: FileEntry | null; properties?: Properties; isLoading: boolean; onClose: () => void }) {
-  const { t } = useI18n(); return <Drawer anchor="right" open={Boolean(entry)} onClose={onClose} PaperProps={{ sx: { width: 'min(100vw, 400px)', p: 3 } }}><Stack spacing={2}><Typography variant="h6">{t('properties.title')}</Typography>{isLoading && <CircularProgress />}{properties && <List disablePadding>{[[t('properties.type'), properties.kind], [t('properties.location'), properties.path], [t('properties.size'), fmtBytes(properties.size)], [t('properties.modified'), fmtDate(new Date(properties.modified * 1000).toISOString())], [t('properties.permissions'), properties.mode], [t('properties.contents'), properties.entry_count?.toString() ?? '—']].map(([label, value]) => <ListItemText key={label} primary={label} secondary={value} sx={{ py: 1 }} />)}{properties.incomplete && <Alert severity="info">{t('properties.incomplete')}</Alert>}</List>}</Stack></Drawer>;
+  const { t } = useI18n();
+  const titleText = t('properties.title');
+  return (
+    <SidePanel open={Boolean(entry)} onClose={onClose} icon={<InfoOutlined />} title={titleText}>
+      {isLoading && <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /></Stack>}
+      {properties && <Stack spacing={0} sx={{ mt: -1 }}>
+        <DefinitionRow label={t('properties.type')} value={properties.kind} />
+        <DefinitionRow label={t('properties.location')} value={properties.path} mono />
+        <DefinitionRow label={t('properties.size')} value={fmtBytes(properties.size)} />
+        <DefinitionRow label={t('properties.modified')} value={fmtDate(new Date(properties.modified * 1000).toISOString())} />
+        <DefinitionRow label={t('properties.permissions')} value={properties.mode} mono />
+        {properties.entry_count !== undefined && <DefinitionRow label={t('properties.contents')} value={properties.entry_count.toString()} />}
+        {properties.incomplete && <Alert severity="info" sx={{ mt: 2 }}>{t('properties.incomplete')}</Alert>}
+      </Stack>}
+    </SidePanel>
+  );
 }

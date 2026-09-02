@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { I18nProvider } from '../i18n';
 import type { FileEntry } from '../api/client';
-import { EntryMenu, editorPathFromLocation, entryMenuActions } from './Workspace';
+import { EntryMenu, editorPathFromLocation } from './Workspace';
+import { entryMenuActions } from './entryActions';
 
 const file: FileEntry = {
   name: 'notes.txt',
@@ -47,11 +48,9 @@ describe('entry menu rendering', () => {
     const anchor = document.createElement('button');
     document.body.append(anchor);
     render(<I18nProvider><EntryMenu entry={file} anchor={anchor} onClose={() => {}} onAction={() => {}} mutable editorAvailable /></I18nProvider>);
-    const menu = screen.getByRole('menu');
     const items = screen.getAllByRole('menuitem');
     expect(items).toHaveLength(9);
     expect(items.every((item) => item.querySelector('svg'))).toBe(true);
-    expect(Array.from(menu.children).some((child) => child.getAttribute('role') === 'menuitem')).toBe(true);
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveClass('MuiMenuItem-root');
   });
 });

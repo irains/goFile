@@ -7,15 +7,21 @@
     <meta name="fileharbor-runtime" content="{}" />
     <script>
       (() => {
-        let mode = 'dark';
-        try { mode = localStorage.getItem('fileharbor-mode') === 'light' ? 'light' : 'dark'; } catch (_) {}
-        document.documentElement.setAttribute('data-mui-color-scheme', mode);
-        document.documentElement.style.colorScheme = mode;
+        let mode = 'system';
+        let resolved = '';
+        try {
+          const stored = localStorage.getItem('fileharbor-mode');
+          mode = (stored === 'light' || stored === 'dark' || stored === 'system') ? stored : 'system';
+        } catch (_) {}
+        const mediaDark = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        resolved = mode === 'light' ? 'light' : mode === 'dark' ? 'dark' : (mediaDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-mui-color-scheme', resolved);
+        document.documentElement.style.colorScheme = resolved;
       })();
     </script>
     <title>FileHarbor</title>
-    <script type="module" crossorigin src="./assets/index-B6sHi9eO.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-qoYEbwR_.css">
+    <script type="module" crossorigin src="./assets/index-V6fAH8fF.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BlEcBQh5.css">
   </head>
   <body>
     <div id="root"></div>

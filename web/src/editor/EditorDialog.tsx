@@ -4,11 +4,12 @@ import 'ace-builds/css/theme/github_light_default.css';
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
 import { useColorScheme } from '@mui/material/styles';
-import { Alert, Dialog, DialogActions, DialogContent, DialogTitle, Button, Chip, Stack, Typography } from '@mui/material';
+import { Alert, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
 import type { FileEntry } from '../api/client';
 import { ApiError, api } from '../api/client';
 import { useI18n } from '../i18n';
-import { aceThemeForMode } from '../theme';
+import { resolveColorScheme, aceThemeForMode, type ThemeMode } from '../theme';
+import { DialogShell } from '../components/DialogShell';
 
 type AceComponent = ComponentType<any>;
 
@@ -38,8 +39,8 @@ function modeFor(name: string) {
 
 export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; writable: boolean; onClose: () => void }) {
   const { mode } = useColorScheme();
-  const aceTheme = aceThemeForMode(mode);
   const { t } = useI18n();
+  const aceTheme = aceThemeForMode(resolveColorScheme((mode ?? 'system') as ThemeMode));
   const [Ace, setAce] = useState<AceComponent | null>(null);
   const [value, setValue] = useState('');
   const [original, setOriginal] = useState('');
@@ -47,6 +48,7 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
   const [error, setError] = useState<string | null>(null);
   const [conflicted, setConflicted] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const dirty = value !== original;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -125,13 +127,39 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
   // it here would rebind this lightweight listener on every keystroke.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, saving, writable, version, value]);
-  const close = () => { if (dirty && !window.confirm(t('editor.discard'))) return; onClose(); };
-  return <Dialog open onClose={close} fullScreen>
-    <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Typography noWrap sx={{ flex: 1 }}>{t('editor.title')}: {entry.name}</Typography>{dirty && <Chip size="small" color="warning" label={t('editor.unsaved')} />}</DialogTitle>
-    <DialogContent dividers sx={{ p: 0, display: 'flex', flexDirection: 'column' }}>
-      {error && <Alert severity={conflicted ? 'warning' : 'error'} action={conflicted ? <Button color="inherit" size="small" onClick={() => void load(true)}>{t('editor.reload')}</Button> : undefined}>{error}</Alert>}
-      {Ace ? <Ace mode={modeFor(entry.name)} theme={aceTheme} name={`editor-${entry.path}`} width="100%" height="100%" value={value} readOnly={!writable} onChange={setValue} onLoad={(editor: { focus: () => void }) => editor.focus()} setOptions={{ useWorker: false, showPrintMargin: false, fontSize: 14 }} /> : <Stack alignItems="center" justifyContent="center" sx={{ flex: 1 }}><Typography>{t('upload.hashing')}</Typography></Stack>}
-    </DialogContent>
-    <DialogActions><Button onClick={close}>{t('action.close')}</Button>{writable && <Button variant="contained" disabled={saving || !dirty || !version} onClick={() => void save()}>{t('editor.save')}</Button>}</DialogActions>
-  </Dialog>;
+  const close = () => { if (dirty) setDiscarding(true); else onClose(); };
+  const discard = async () => {
+    setDiscarding(false);
+    if (dirty && writable && version) await save();
+    onClose();
+  };
+  const language = modeFor(entry.name);
+  return (
+    <Dialog open onClose={close} fullScreen>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Stack sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="bodyStrong" noWrap>{entry.path}</Typography>
+          <Typography variant="caption" color="text.secondary">{language}</Typography>
+        </Stack>
+        <Tooltip title={t('editor.languageHint')}><Chip size="small" label={language} /></Tooltip>
+        {dirty && <Chip size="small" color="warning" label={t('editor.unsaved')} />}
+      </DialogTitle>
+      <DialogContent dividers sx={{ p: 0, display: 'flex', flexDirection: 'column' }}>
+        {error && <Alert severity={conflicted ? 'warning' : 'error'} action={conflicted ? <Button color="inherit" size="small" onClick={() => void load(true)}>{t('editor.reload')}</Button> : undefined}>{error}</Alert>}
+        {Ace ? <Ace mode={language} theme={aceTheme} name={`editor-${entry.path}`} width="100%" height="100%" value={value} readOnly={!writable} onChange={setValue} onLoad={(editor: { focus: () => void }) => editor.focus()} setOptions={{ useWorker: false, showPrintMargin: false, fontSize: 14 }} /> : <Stack alignItems="center" justifyContent="center" sx={{ flex: 1, p: 4 }}><Skeleton variant="rectangular" width="100%" height={400} animation={false} /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}
+      </DialogContent>
+      <DialogActions sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+        <Button onClick={close}>{t('action.close')}</Button>
+        {writable && <Button variant="contained" disabled={saving || !dirty || !version} onClick={() => void save()}>{t('editor.save')}</Button>}
+      </DialogActions>
+      <DialogShell open={discarding} onClose={() => setDiscarding(false)} title={t('dialog.confirmDiscard')} hideActions>
+        <Typography color="text.secondary">{t('dialog.deleteText')}</Typography>
+        <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ pt: 1 }}>
+          <Button onClick={() => setDiscarding(false)}>{t('action.cancel')}</Button>
+          <Button color="error" onClick={() => { setDiscarding(false); onClose(); }}>{t('dialog.discard')}</Button>
+          {writable && <Button variant="contained" disabled={saving} onClick={() => void discard()}>{t('editor.save')}</Button>}
+        </Stack>
+      </DialogShell>
+    </Dialog>
+  );
 }

@@ -3,8 +3,8 @@
     "file": "assets/ace--y1r1oGL.js",
     "name": "ace"
   },
-  "_ace-BNAfyQLn.js": {
-    "file": "assets/ace-BNAfyQLn.js",
+  "_ace-CeqmjnZr.js": {
+    "file": "assets/ace-CeqmjnZr.js",
     "name": "ace",
     "isDynamicEntry": true,
     "imports": [
@@ -12,8 +12,8 @@
       "_ace--y1r1oGL.js"
     ]
   },
-  "_index-fHKHhlHM.js": {
-    "file": "assets/index-fHKHhlHM.js",
+  "_index-DG0jTU--.js": {
+    "file": "assets/index-DG0jTU--.js",
     "name": "index",
     "isDynamicEntry": true,
     "imports": [
@@ -21,128 +21,128 @@
       "_ace--y1r1oGL.js"
     ]
   },
-  "_mode-css-CO_ahvms.js": {
-    "file": "assets/mode-css-CO_ahvms.js",
+  "_mode-css-ClYBgV6T.js": {
+    "file": "assets/mode-css-ClYBgV6T.js",
     "name": "mode-css",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-golang-BOcvUtHD.js": {
-    "file": "assets/mode-golang-BOcvUtHD.js",
+  "_mode-golang-CQXkEdHv.js": {
+    "file": "assets/mode-golang-CQXkEdHv.js",
     "name": "mode-golang",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-html-B7zH3gfw.js": {
-    "file": "assets/mode-html-B7zH3gfw.js",
+  "_mode-html-B2qsEw4f.js": {
+    "file": "assets/mode-html-B2qsEw4f.js",
     "name": "mode-html",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-javascript-DkBeV--2.js": {
-    "file": "assets/mode-javascript-DkBeV--2.js",
+  "_mode-javascript-UZt2yAkB.js": {
+    "file": "assets/mode-javascript-UZt2yAkB.js",
     "name": "mode-javascript",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-json-ey7kVi4_.js": {
-    "file": "assets/mode-json-ey7kVi4_.js",
+  "_mode-json-PdKggTYY.js": {
+    "file": "assets/mode-json-PdKggTYY.js",
     "name": "mode-json",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-markdown-BcXVqAXU.js": {
-    "file": "assets/mode-markdown-BcXVqAXU.js",
+  "_mode-markdown-DNKHasI0.js": {
+    "file": "assets/mode-markdown-DNKHasI0.js",
     "name": "mode-markdown",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-python-B1B5N-1u.js": {
-    "file": "assets/mode-python-B1B5N-1u.js",
+  "_mode-python-CTKCoIeT.js": {
+    "file": "assets/mode-python-CTKCoIeT.js",
     "name": "mode-python",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-sh-D0itB3Ge.js": {
-    "file": "assets/mode-sh-D0itB3Ge.js",
+  "_mode-sh-BwdP0niH.js": {
+    "file": "assets/mode-sh-BwdP0niH.js",
     "name": "mode-sh",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-sql-C83B1Cz-.js": {
-    "file": "assets/mode-sql-C83B1Cz-.js",
+  "_mode-sql-DklEJSoD.js": {
+    "file": "assets/mode-sql-DklEJSoD.js",
     "name": "mode-sql",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-toml-DfrH-bkG.js": {
-    "file": "assets/mode-toml-DfrH-bkG.js",
+  "_mode-toml-2RSpsqw_.js": {
+    "file": "assets/mode-toml-2RSpsqw_.js",
     "name": "mode-toml",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-tsx-Cwe56xsi.js": {
-    "file": "assets/mode-tsx-Cwe56xsi.js",
+  "_mode-tsx-CAPiIRZS.js": {
+    "file": "assets/mode-tsx-CAPiIRZS.js",
     "name": "mode-tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-typescript-CNAnO8BT.js": {
-    "file": "assets/mode-typescript-CNAnO8BT.js",
+  "_mode-typescript-D512tLtc.js": {
+    "file": "assets/mode-typescript-D512tLtc.js",
     "name": "mode-typescript",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-xml-CVPIH-N6.js": {
-    "file": "assets/mode-xml-CVPIH-N6.js",
+  "_mode-xml-BxMxaSdG.js": {
+    "file": "assets/mode-xml-BxMxaSdG.js",
     "name": "mode-xml",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_mode-yaml-Dw2Nilbd.js": {
-    "file": "assets/mode-yaml-Dw2Nilbd.js",
+  "_mode-yaml-Bg7kYHx-.js": {
+    "file": "assets/mode-yaml-Bg7kYHx-.js",
     "name": "mode-yaml",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_theme-github_dark-BEv-FCH9.js": {
-    "file": "assets/theme-github_dark-BEv-FCH9.js",
+  "_theme-github_dark-DQtXQTyV.js": {
+    "file": "assets/theme-github_dark-DQtXQTyV.js",
     "name": "theme-github_dark",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ]
   },
-  "_theme-github_light_default-CaVB8ryg.js": {
-    "file": "assets/theme-github_light_default-CaVB8ryg.js",
+  "_theme-github_light_default-ByVdES0H.js": {
+    "file": "assets/theme-github_light_default-ByVdES0H.js",
     "name": "theme-github_light_default",
     "isDynamicEntry": true,
     "imports": [
@@ -150,7 +150,7 @@
     ]
   },
   "index.html": {
-    "file": "assets/index-B6sHi9eO.js",
+    "file": "assets/index-V6fAH8fF.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -158,11 +158,11 @@
       "src/editor/EditorDialog.tsx"
     ],
     "css": [
-      "assets/index-qoYEbwR_.css"
+      "assets/index-BlEcBQh5.css"
     ]
   },
   "src/editor/EditorDialog.tsx": {
-    "file": "assets/EditorDialog-Dvp-JdEF.js",
+    "file": "assets/EditorDialog-CY2spP1s.js",
     "name": "EditorDialog",
     "src": "src/editor/EditorDialog.tsx",
     "isDynamicEntry": true,
@@ -170,24 +170,24 @@
       "index.html"
     ],
     "dynamicImports": [
-      "_ace-BNAfyQLn.js",
-      "_index-fHKHhlHM.js",
-      "_theme-github_dark-BEv-FCH9.js",
-      "_theme-github_light_default-CaVB8ryg.js",
-      "_mode-javascript-DkBeV--2.js",
-      "_mode-typescript-CNAnO8BT.js",
-      "_mode-tsx-Cwe56xsi.js",
-      "_mode-json-ey7kVi4_.js",
-      "_mode-markdown-BcXVqAXU.js",
-      "_mode-yaml-Dw2Nilbd.js",
-      "_mode-sh-D0itB3Ge.js",
-      "_mode-golang-BOcvUtHD.js",
-      "_mode-python-B1B5N-1u.js",
-      "_mode-html-B7zH3gfw.js",
-      "_mode-css-CO_ahvms.js",
-      "_mode-xml-CVPIH-N6.js",
-      "_mode-sql-C83B1Cz-.js",
-      "_mode-toml-DfrH-bkG.js"
+      "_ace-CeqmjnZr.js",
+      "_index-DG0jTU--.js",
+      "_theme-github_dark-DQtXQTyV.js",
+      "_theme-github_light_default-ByVdES0H.js",
+      "_mode-javascript-UZt2yAkB.js",
+      "_mode-typescript-D512tLtc.js",
+      "_mode-tsx-CAPiIRZS.js",
+      "_mode-json-PdKggTYY.js",
+      "_mode-markdown-DNKHasI0.js",
+      "_mode-yaml-Bg7kYHx-.js",
+      "_mode-sh-BwdP0niH.js",
+      "_mode-golang-CQXkEdHv.js",
+      "_mode-python-CTKCoIeT.js",
+      "_mode-html-B2qsEw4f.js",
+      "_mode-css-ClYBgV6T.js",
+      "_mode-xml-BxMxaSdG.js",
+      "_mode-sql-DklEJSoD.js",
+      "_mode-toml-2RSpsqw_.js"
     ],
     "css": [
       "assets/EditorDialog-D0kE__hN.css"
