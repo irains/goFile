@@ -89,6 +89,24 @@ describe('design tokens', () => {
     expect(baseline[':focus-visible']).toMatchObject({ outline: '2px solid var(--mui-palette-primary-main)', outlineOffset: '2px' });
   });
 
+  it('keeps outlined inputs bound to the active color-scheme variables', () => {
+    const theme = createAppTheme();
+    const outlinedInput = theme.components?.MuiOutlinedInput?.styleOverrides;
+    expect(outlinedInput?.root).toMatchObject({
+      backgroundColor: 'var(--mui-palette-background-paper)',
+      color: 'var(--mui-palette-text-primary)'
+    });
+    expect(outlinedInput?.input).toMatchObject({
+      color: 'var(--mui-palette-text-primary)',
+      WebkitTextFillColor: 'var(--mui-palette-text-primary)',
+      '&:-webkit-autofill': {
+        WebkitBoxShadow: '0 0 0 100px var(--mui-palette-background-paper) inset',
+        WebkitTextFillColor: 'var(--mui-palette-text-primary)'
+      }
+    });
+    expect(outlinedInput?.notchedOutline).toMatchObject({ borderColor: 'var(--mui-palette-divider)' });
+  });
+
   it('keeps normal controls comfortable and table controls dense', () => {
     const theme = createAppTheme();
     const button = theme.components?.MuiButton?.styleOverrides;

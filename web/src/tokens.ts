@@ -214,8 +214,22 @@ export function createAppTheme() {
       MuiChip: { styleOverrides: { root: { borderRadius: radii.sm, fontWeight: 600 } } },
       MuiOutlinedInput: {
         styleOverrides: {
-          root: ({ theme }) => ({ backgroundColor: theme.palette.background.paper, transition: controlTransition }),
-          notchedOutline: ({ theme }) => ({ borderColor: theme.palette.divider })
+          // Component overrides are evaluated against the default scheme. Use live
+          // CSS variables so every rendered scheme keeps its own foreground and paper.
+          root: {
+            backgroundColor: 'var(--mui-palette-background-paper)',
+            color: 'var(--mui-palette-text-primary)',
+            transition: controlTransition
+          },
+          input: {
+            color: 'var(--mui-palette-text-primary)',
+            WebkitTextFillColor: 'var(--mui-palette-text-primary)',
+            '&:-webkit-autofill': {
+              WebkitBoxShadow: '0 0 0 100px var(--mui-palette-background-paper) inset',
+              WebkitTextFillColor: 'var(--mui-palette-text-primary)'
+            }
+          },
+          notchedOutline: { borderColor: 'var(--mui-palette-divider)' }
         }
       },
       MuiTableCell: { styleOverrides: { head: ({ theme }) => ({ backgroundColor: theme.palette.background.paper, color: theme.palette.text.secondary, fontWeight: 700 }) } },

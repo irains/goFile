@@ -16,7 +16,6 @@
         const mediaDark = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
         resolved = mode === 'light' ? 'light' : mode === 'dark' ? 'dark' : (mediaDark ? 'dark' : 'light');
         document.documentElement.setAttribute('data-mui-color-scheme', resolved);
-        document.documentElement.style.colorScheme = resolved;
       })();
     </script>
     <link rel="stylesheet" href="/src/prepaint.css" />

@@ -49,6 +49,9 @@ func TestEmbeddedSPAShellAndAssets(t *testing.T) {
 	if !strings.Contains(body, `localStorage.getItem("fileharbor-mode")`) || !strings.Contains(body, `data-mui-color-scheme`) || !strings.Contains(body, `nonce="`) || !strings.Contains(body, `#171D18`) || !strings.Contains(body, `#F3F0E7`) {
 		t.Fatalf("shell theme bootstrap is invalid: %s", body)
 	}
+	if strings.Contains(body, `root.style.colorScheme`) {
+		t.Fatalf("theme bootstrap must not pin a stale inline color scheme: %s", body)
+	}
 	prepaint := strings.Index(body, `localStorage.getItem("fileharbor-mode")`)
 	asset := strings.Index(body, "/fileharbor/assets/")
 	if prepaint == -1 || asset == -1 || prepaint > asset {
