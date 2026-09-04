@@ -101,17 +101,19 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
 
-  const save = async () => {
-    if (!writable || !version) return;
+  const save = async (): Promise<boolean> => {
+    if (!writable || !version) return false;
     setSaving(true); setError(null);
     try {
       const response = await api.saveEditorContent(entry.path, value, version);
       setOriginal(value);
       setVersion(response.editor.version);
       setConflicted(false);
+      return true;
     } catch (saveError) {
       if (saveError instanceof ApiError && saveError.code === 'source_changed') setConflicted(true);
       setError(saveError instanceof ApiError ? t(`error.${saveError.code}`) : t('error.generic'));
+      return false;
     } finally { setSaving(false); }
   };
   useEffect(() => {
@@ -128,10 +130,11 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, saving, writable, version, value]);
   const close = () => { if (dirty) setDiscarding(true); else onClose(); };
-  const discard = async () => {
-    setDiscarding(false);
-    if (dirty && writable && version) await save();
-    onClose();
+  const saveAndClose = async () => {
+    if (await save()) {
+      setDiscarding(false);
+      onClose();
+    }
   };
   const language = modeFor(entry.name);
   return (
@@ -142,22 +145,23 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
           <Typography variant="caption" color="text.secondary">{language}</Typography>
         </Stack>
         <Tooltip title={t('editor.languageHint')}><Chip size="small" label={language} /></Tooltip>
+        {!writable && <Chip size="small" variant="outlined" label={t('editor.readOnly')} />}
         {dirty && <Chip size="small" color="warning" label={t('editor.unsaved')} />}
       </DialogTitle>
       <DialogContent dividers sx={{ p: 0, display: 'flex', flexDirection: 'column' }}>
         {error && <Alert severity={conflicted ? 'warning' : 'error'} action={conflicted ? <Button color="inherit" size="small" onClick={() => void load(true)}>{t('editor.reload')}</Button> : undefined}>{error}</Alert>}
-        {Ace ? <Ace mode={language} theme={aceTheme} name={`editor-${entry.path}`} width="100%" height="100%" value={value} readOnly={!writable} onChange={setValue} onLoad={(editor: { focus: () => void }) => editor.focus()} setOptions={{ useWorker: false, showPrintMargin: false, fontSize: 14 }} /> : <Stack alignItems="center" justifyContent="center" sx={{ flex: 1, p: 4 }}><Skeleton variant="rectangular" width="100%" height={400} animation={false} /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}
+        {Ace ? <Ace mode={language} theme={aceTheme} name={`editor-${entry.path}`} width="100%" height="100%" value={value} readOnly={!writable} onChange={setValue} onLoad={(editor: { focus: () => void }) => editor.focus()} setOptions={{ useWorker: false, showPrintMargin: false, fontSize: 14 }} /> : <Stack role="status" aria-live="polite" alignItems="center" justifyContent="center" sx={{ flex: 1, p: 4 }}><Skeleton variant="rectangular" width="100%" height={400} animation={false} /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}
       </DialogContent>
       <DialogActions sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
         <Button onClick={close}>{t('action.close')}</Button>
         {writable && <Button variant="contained" disabled={saving || !dirty || !version} onClick={() => void save()}>{t('editor.save')}</Button>}
       </DialogActions>
       <DialogShell open={discarding} onClose={() => setDiscarding(false)} title={t('dialog.confirmDiscard')} hideActions>
-        <Typography color="text.secondary">{t('dialog.deleteText')}</Typography>
+        <Typography color="text.secondary">{t('editor.discardWarning')}</Typography>
         <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ pt: 1 }}>
           <Button onClick={() => setDiscarding(false)}>{t('action.cancel')}</Button>
           <Button color="error" onClick={() => { setDiscarding(false); onClose(); }}>{t('dialog.discard')}</Button>
-          {writable && <Button variant="contained" disabled={saving} onClick={() => void discard()}>{t('editor.save')}</Button>}
+          {writable && <Button variant="contained" disabled={saving} onClick={() => void saveAndClose()}>{t('editor.save')}</Button>}
         </Stack>
       </DialogShell>
     </Dialog>

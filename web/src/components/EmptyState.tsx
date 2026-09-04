@@ -11,7 +11,7 @@ type EmptyStateProps = {
 export function EmptyState({ icon, title, caption, action }: EmptyStateProps) {
   return (
     <Stack alignItems="center" justifyContent="center" spacing={1.5} sx={{ py: 6, px: 3, textAlign: 'center' }}>
-      <Box sx={{ color: 'text.disabled', display: 'inline-flex', '& svg': { fontSize: 56 } }}>{icon}</Box>
+      <Box sx={{ color: 'primary.light', display: 'inline-flex', '& svg': { fontSize: 52 } }}>{icon}</Box>
       <Typography variant="title" component="p">{title}</Typography>
       {caption && (
         <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 360 }}>

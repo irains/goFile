@@ -17,7 +17,12 @@ export function LoginPage() {
   const { t } = useI18n();
   const { setSession } = useSession();
   const [serverError, setServerError] = useState<string | null>(null);
-  const { control, handleSubmit, formState: { isSubmitting, errors } } = useForm<LoginValues>({ resolver: zodResolver(loginSchema), defaultValues: { username: '', password: '' } });
+  const { control, handleSubmit, formState: { isSubmitting, errors } } = useForm<LoginValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { username: '', password: '' },
+    mode: 'onBlur',
+    reValidateMode: 'onChange'
+  });
   const onSubmit = async (values: LoginValues) => {
     setServerError(null);
     try {
@@ -29,18 +34,18 @@ export function LoginPage() {
     }
   };
   return (
-    <Box component="main" sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 4 }, bgcolor: 'background.default' }}>
-      <Card sx={{ ...surface, width: 'min(100%, 440px)', borderRadius: 'lg' }}>
+    <Box component="main" sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 4 } }}>
+      <Card sx={{ ...surface, width: 'min(100%, 440px)' }}>
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
           <Stack spacing={3} component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
             <Stack spacing={1.5}>
-              <Mark size={32} color="primary" />
+              <Box sx={{ color: 'primary.main', lineHeight: 0 }}><Mark size={32} /></Box>
               <Typography component="h1" variant="title">{t('login.title')}</Typography>
               <Typography variant="caption" color="text.secondary">{t('login.subtitle')}</Typography>
             </Stack>
             {serverError && <Alert severity="error">{serverError}</Alert>}
-            <Controller name="username" control={control} render={({ field }) => <TextField {...field} autoComplete="username" autoFocus label={t('login.username')} error={Boolean(errors.username)} helperText={errors.username ? t('error.invalid_request') : undefined} fullWidth required />} />
-            <Controller name="password" control={control} render={({ field }) => <TextField {...field} type="password" autoComplete="current-password" label={t('login.password')} error={Boolean(errors.password)} helperText={errors.password ? t('error.invalid_request') : undefined} fullWidth required />} />
+            <Controller name="username" control={control} render={({ field }) => <TextField {...field} autoComplete="username" autoFocus label={t('login.username')} error={Boolean(errors.username)} helperText={errors.username ? t('login.usernameRequired') : undefined} fullWidth required />} />
+            <Controller name="password" control={control} render={({ field }) => <TextField {...field} type="password" autoComplete="current-password" label={t('login.password')} error={Boolean(errors.password)} helperText={errors.password ? t('login.passwordRequired') : undefined} fullWidth required />} />
             <Button type="submit" size="large" variant="contained" disabled={isSubmitting}>{t('login.signIn')}</Button>
           </Stack>
         </CardContent>

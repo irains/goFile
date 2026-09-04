@@ -23,6 +23,7 @@ import {
 import type { SvgIconComponent } from '@mui/icons-material';
 import {
   Alert,
+  type AlertColor,
   AppBar,
   Box,
   Breadcrumbs,
@@ -64,7 +65,7 @@ import { EmptyState } from './EmptyState';
 import { UploadQueueDrawer } from './UploadQueueDrawer';
 import { nextThemeMode, type ThemeMode } from '../theme';
 import { entryMenuActions, hoverActionNames, type EntryAction, type EntryActionName } from './entryActions';
-import { surface } from '../tokens';
+import { fontFamilyMono, radii, surface } from '../tokens';
 
 const LazyEditorDialog = lazy(() => import('../editor/EditorDialog').then((module) => ({ default: module.EditorDialog })));
 type FormAction = 'newdir' | 'newfile' | 'rename' | 'move' | 'copy';
@@ -73,6 +74,7 @@ type FormState = { action: FormAction; entry?: FileEntry } | null;
 const fmtBytes = (value: number) => new Intl.NumberFormat(undefined, { style: 'unit', unit: 'byte', notation: value > 1_000_000 ? 'compact' : 'standard', unitDisplay: 'narrow' }).format(value);
 const fmtDate = (value: string | number) => value ? new Date(value).toLocaleString() : '—';
 const navigateDirectory = (path: string) => { window.location.assign(itemUrl('d', path)); };
+export const entryKindLabel = (kind: FileEntry['kind'], t: (key: string) => string) => t(kind === 'directory' ? 'workspace.folder' : 'workspace.file');
 
 function directoryPathFromLocation(): string {
   const base = itemUrl('d', '').replace(/\/$/, '');
@@ -114,9 +116,9 @@ function AppearanceToggle() {
   );
 }
 
-function RowActions({ entry, onAction, onMenu }: { entry: FileEntry; onAction: (name: EntryActionName) => void; onMenu: (event: React.MouseEvent<HTMLElement>) => void }) {
+function RowActions({ entry, compact, onAction, onMenu }: { entry: FileEntry; compact: boolean; onAction: (name: EntryActionName) => void; onMenu: (event: React.MouseEvent<HTMLElement>) => void }) {
   const { t } = useI18n();
-  const visible = hoverActionNames.filter((name) => {
+  const visible = compact ? [] : hoverActionNames.filter((name) => {
     const action = entryMenuActions(entry, true, true).find((item) => item.name === name);
     return Boolean(action);
   });
@@ -160,7 +162,7 @@ export function Workspace() {
   const [editorFor, setEditorFor] = useState<FileEntry | null>(null);
   const editorPath = editorPathFromLocation();
   const [showUploads, setShowUploads] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ message: string; severity: AlertColor } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ type: 'single'; entry: FileEntry } | { type: 'batch'; entries: FileEntry[] } | null>(null);
   const compact = useMediaQuery(theme.breakpoints.down('md'));
   const currentPath = directoryPathFromLocation();
@@ -189,13 +191,16 @@ export function Workspace() {
   };
   const mutation = useMutation({
     mutationFn: ({ endpoint, values }: { endpoint: string; values: Record<string, string> }) => api.mutate<{ ok: true; hash?: string }>(endpoint, values),
-    onSuccess: async (result) => { if (result.hash) setMessage(result.hash); await refresh(); },
-    onError: (error) => setMessage(error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'))
+    onSuccess: async (result) => {
+      if (result.hash) setNotice({ message: t('success.checksum', { hash: result.hash }), severity: 'success' });
+      await refresh();
+    },
+    onError: (error) => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' })
   });
   const batch = useMutation({
     mutationFn: ({ endpoint, body }: { endpoint: string; body: unknown }) => api.batch<{ ok: boolean; download_url?: string }>(endpoint, body),
     onSuccess: async (result) => { if (result.download_url) window.location.assign(result.download_url); else await refresh(); },
-    onError: (error) => setMessage(error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'))
+    onError: (error) => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' })
   });
   const propertyQuery = useQuery({ queryKey: ['properties', propertiesFor?.path], queryFn: () => api.getProperties(propertiesFor!.path), enabled: Boolean(propertiesFor) });
 
@@ -218,7 +223,7 @@ export function Workspace() {
   };
   const signOut = async () => {
     try { await logout(); window.location.assign(itemUrl('d', '')); }
-    catch (error) { setMessage(error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic')); }
+    catch (error) { setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' }); }
   };
   const confirmDelete = () => {
     if (!pendingDelete) return;
@@ -236,10 +241,10 @@ export function Workspace() {
   }, [listing]);
 
   if (listingQuery.isLoading) return (
-    <Stack component="main" sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
-      <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+    <Stack component="main" sx={{ minHeight: '100dvh' }}>
+      <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Toolbar sx={{ gap: 1.5, px: { xs: 2, sm: 3 } }}>
-          <Mark size={24} color="currentColor" />
+          <Mark size={24} />
           <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
         </Toolbar>
       </AppBar>
@@ -258,7 +263,7 @@ export function Workspace() {
   );
 
   if (listingQuery.isError || !listing) return (
-    <Stack component="main" alignItems="center" justifyContent="center" sx={{ minHeight: '100dvh', p: 4, bgcolor: 'background.default' }}>
+    <Stack component="main" alignItems="center" justifyContent="center" sx={{ minHeight: '100dvh', p: 4 }}>
       <Paper sx={{ ...surface, p: { xs: 3, sm: 4 }, maxWidth: 480 }}>
         <Stack spacing={2}>
           <Alert severity="error">{listingQuery.error instanceof ApiError ? t(`error.${listingQuery.error.code}`) : t('error.generic')}</Alert>
@@ -271,15 +276,15 @@ export function Workspace() {
     </Stack>
   );
 
-  return <Box component="main" sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
-    <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+  return <Box component="main" sx={{ minHeight: '100dvh' }}>
+    <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
       <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
-        <Mark size={22} color="primary" />
+        <Box sx={{ color: 'primary.main', lineHeight: 0 }}><Mark size={22} /></Box>
         <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
         <Tooltip title={t('workspace.refresh')}><IconButton aria-label={t('workspace.refresh')} onClick={() => void refresh()}><Refresh /></IconButton></Tooltip>
         <AppearanceToggle />
         <Tooltip title={locale === 'en' ? '中文' : 'English'}>
-          <IconButton aria-label="Toggle language" onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}><Translate /></IconButton>
+          <IconButton aria-label={locale === 'en' ? t('language.switchToChinese') : t('language.switchToEnglish')} onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}><Translate /></IconButton>
         </Tooltip>
         <Tooltip title={t('app.signOut')}>
           <IconButton aria-label={t('app.signOut')} onClick={() => void signOut()}><LogoutOutlined /></IconButton>
@@ -302,7 +307,7 @@ export function Workspace() {
           {!mutable && !canUpload && <Chip label={t('workspace.readOnly')} variant="outlined" />}
           {mutable && <Stack direction="row" flexWrap="wrap" gap={1}>
             <Button startIcon={<CreateNewFolder />} variant="outlined" onClick={() => setForm({ action: 'newdir' })}>{t('workspace.newFolder')}</Button>
-            {!compact && <Button startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>}
+            <Button startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>
           </Stack>}
           {canUpload && <Button startIcon={<UploadFile />} variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button>}
         </Box>
@@ -322,13 +327,13 @@ export function Workspace() {
               <TableCell>{t('workspace.name')}</TableCell>
               {!compact && <TableCell>{t('workspace.size')}</TableCell>}
               {!compact && <TableCell>{t('workspace.modified')}</TableCell>}
-              <TableCell align="right" sx={{ width: 160 }}>{t('workspace.actions')}</TableCell>
+              <TableCell align="right" sx={{ width: compact ? 112 : 160 }}>{t('workspace.actions')}</TableCell>
             </TableRow></TableHead>
             <TableBody>
-              {listing.parentPath !== null && <TableRow hover><TableCell padding="checkbox" /><TableCell colSpan={compact ? 2 : 4}><Button startIcon={<FolderOpen />} onClick={() => navigateDirectory(listing.parentPath!)} sx={{ justifyContent: 'flex-start' }}>..</Button></TableCell></TableRow>}
+              {listing.parentPath !== null && <TableRow hover><TableCell padding="checkbox" /><TableCell colSpan={compact ? 2 : 4}><Button startIcon={<FolderOpen />} aria-label={t('workspace.parentDirectory')} onClick={() => navigateDirectory(listing.parentPath!)} sx={{ justifyContent: 'flex-start' }}>..</Button></TableCell></TableRow>}
               {entries.map((entry) => (
                 <TableRow hover key={entry.path} selected={selected.has(entry.path)}>
-                  <TableCell padding="checkbox"><Checkbox checked={selected.has(entry.path)} onChange={(event) => select(entry, event.target.checked)} /></TableCell>
+                  <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectItem', { name: entry.name })} checked={selected.has(entry.path)} onChange={(event) => select(entry, event.target.checked)} /></TableCell>
                   <TableCell sx={{ maxWidth: 0 }}>
                     <Stack direction="row" spacing={1.25} alignItems="center">
                       <ListItemIcon sx={{ minWidth: 28, color: entry.kind === 'directory' ? 'primary.light' : 'text.secondary' }}>
@@ -345,15 +350,16 @@ export function Workspace() {
                         >
                           {entry.name}
                         </Typography>
-                        {compact && <Typography variant="caption" color="text.secondary" component="div">{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : t('properties.type')} · {fmtDate(entry.modifiedAt)}</Typography>}
+                        {compact && <Typography variant="caption" color="text.secondary" component="div">{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : entryKindLabel(entry.kind, t)} · {fmtDate(entry.modifiedAt)}</Typography>}
                       </Box>
                     </Stack>
                   </TableCell>
                   {!compact && <TableCell>{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : '—'}</TableCell>}
                   {!compact && <TableCell>{fmtDate(entry.modifiedAt)}</TableCell>}
-                  <TableCell align="right" sx={{ width: 160 }}>
+                  <TableCell align="right" sx={{ width: compact ? 112 : 160 }}>
                     <RowActions
                       entry={entry}
+                      compact={compact}
                       onAction={(name) => performEntryAction(name, entry)}
                       onMenu={(event) => { setMenuEntry(entry); setMenuAnchor(event.currentTarget); }}
                     />
@@ -380,7 +386,7 @@ export function Workspace() {
     <EntryMenu entry={menuEntry} anchor={menuAnchor} onClose={() => { setMenuEntry(null); setMenuAnchor(null); }} onAction={performEntryAction} mutable={mutable} editorAvailable={Boolean(session?.capabilities.editorSave || session?.capabilities.browse)} />
     <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => mutation.mutate({ endpoint, values })} onBatchSubmit={doBatch} />
     <PropertiesDialog entry={propertiesFor} properties={propertyQuery.data?.properties} isLoading={propertyQuery.isLoading} onClose={() => setPropertiesFor(null)} />
-    {activeEditor && <Suspense fallback={<CircularProgress />}><LazyEditorDialog entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={() => { setEditorFor(null); if (editorPath) window.location.assign(itemUrl('d', '')); }} /></Suspense>}
+    {activeEditor && <Suspense fallback={<Stack role="status" aria-live="polite" alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}><LazyEditorDialog entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={() => { setEditorFor(null); if (editorPath) window.location.assign(itemUrl('d', '')); }} /></Suspense>}
     {canUpload && <UploadQueueDrawer open={showUploads} onClose={() => setShowUploads(false)} destination={listing.path} username={session?.username ?? ''} onAllComplete={() => void refresh()} />}
     <DialogShell
       open={Boolean(pendingDelete)}
@@ -394,7 +400,7 @@ export function Workspace() {
     >
       <Typography color="text.secondary">{t('dialog.deleteText')}</Typography>
     </DialogShell>
-    <Snackbar open={Boolean(message)} autoHideDuration={6000} onClose={() => setMessage(null)}><Alert severity="error" variant="filled" onClose={() => setMessage(null)}>{message}</Alert></Snackbar>
+    <Snackbar open={Boolean(notice)} autoHideDuration={6000} onClose={() => setNotice(null)}><Alert severity={notice?.severity ?? 'info'} variant="filled" onClose={() => setNotice(null)}>{notice?.message}</Alert></Snackbar>
   </Box>;
 }
 
@@ -457,7 +463,7 @@ function FolderPicker({ open, initialPath, onClose, onChoose }: { open: boolean;
           <Button key={`${part}-${index}`} onClick={() => setPath(all.slice(0, index + 1).join('/'))} size="small">{part}</Button>
         ))}
       </Breadcrumbs>
-      <Box sx={{ minHeight: 200, border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1, overflow: 'auto', maxHeight: 300 }}>
+      <Box sx={{ minHeight: 200, border: '1px solid', borderColor: 'divider', borderRadius: radii.sm, p: 1, overflow: 'auto', maxHeight: 300 }}>
         {query.isLoading && <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 120 }}><CircularProgress size={24} /></Stack>}
         {query.data?.dirs.map((dir) => (
           <Button key={dir.path} onClick={() => setPath(dir.path)} fullWidth sx={{ justifyContent: 'flex-start' }} startIcon={<Folder color="primary" />}>{dir.name}</Button>
@@ -471,7 +477,7 @@ function DefinitionRow({ label, value, mono }: { label: string; value: string; m
   return (
     <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ py: 1, borderBottom: '1px solid', borderColor: 'divider' }} spacing={2}>
       <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{label}</Typography>
-      <Typography variant="body" sx={{ fontFamily: mono ? 'fontFamilyMono' : undefined, overflowWrap: 'anywhere', textAlign: 'right', minWidth: 0 }}>{value || '—'}</Typography>
+      <Typography variant="body" sx={{ fontFamily: mono ? fontFamilyMono : undefined, overflowWrap: 'anywhere', textAlign: 'right', minWidth: 0 }}>{value || '—'}</Typography>
     </Stack>
   );
 }
@@ -483,7 +489,7 @@ function PropertiesDialog({ entry, properties, isLoading, onClose }: { entry: Fi
     <SidePanel open={Boolean(entry)} onClose={onClose} icon={<InfoOutlined />} title={titleText}>
       {isLoading && <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /></Stack>}
       {properties && <Stack spacing={0} sx={{ mt: -1 }}>
-        <DefinitionRow label={t('properties.type')} value={properties.kind} />
+        <DefinitionRow label={t('properties.type')} value={entryKindLabel(properties.kind, t)} />
         <DefinitionRow label={t('properties.location')} value={properties.path} mono />
         <DefinitionRow label={t('properties.size')} value={fmtBytes(properties.size)} />
         <DefinitionRow label={t('properties.modified')} value={fmtDate(new Date(properties.modified * 1000).toISOString())} />

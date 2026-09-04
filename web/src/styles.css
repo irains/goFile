@@ -1,11 +1,55 @@
-:root { color-scheme: dark; font-synthesis: none; text-rendering: optimizeLegibility; background: #17171c; color: #eeeef3; }
-:root[data-mui-color-scheme="light"] { color-scheme: light; background: #f8f7fb; color: #211f2a; }
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  background-color: #171D18;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgb(219 231 207 / 2.6%) 0 0.65px, transparent 0.8px),
+    linear-gradient(118deg, rgb(128 159 113 / 2%), transparent 42%, rgb(100 172 180 / 1.8%));
+  background-size: 13px 13px, 100% 100%;
+  color: #F0F1E7;
+}
+
+:root[data-mui-color-scheme="light"] {
+  color-scheme: light;
+  background-color: #F3F0E7;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgb(67 84 54 / 4%) 0 0.65px, transparent 0.8px),
+    linear-gradient(118deg, rgb(89 111 74 / 2.5%), transparent 42%, rgb(37 99 109 / 2.5%));
+  color: #242820;
+}
+
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; }
-body { margin: 0; background: inherit; color: inherit; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; } }
-:focus-visible { outline: 2px solid #6252ba; outline-offset: 2px; }
-:root[data-mui-color-scheme="dark"] :focus-visible { outline-color: #9b8cff; }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: rgba(127, 127, 127, 0.35); border-radius: 999px; }
-::-webkit-scrollbar-track { background: transparent; }
+html body { margin: 0; background: transparent; color: inherit; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+:focus-visible { outline: 2px solid #9EC6A0; outline-offset: 2px; }
+:root[data-mui-color-scheme="light"] :focus-visible { outline-color: #2D533B; }
+
+@media (forced-colors: active) {
+  :root, :root[data-mui-color-scheme="light"] {
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  body { background: Canvas; color: CanvasText; }
+  :focus-visible { outline-color: Highlight; }
+  .MuiPaper-root, .MuiAppBar-root, .MuiDrawer-paper, .MuiDialog-paper, .MuiMenu-paper,
+  .MuiInputBase-root, .MuiTableCell-head {
+    background: Canvas !important;
+    background-image: none !important;
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+    box-shadow: none !important;
+  }
+  .MuiButtonBase-root { color: ButtonText; }
+}

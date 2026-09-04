@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { I18nProvider } from '../i18n';
 import type { FileEntry } from '../api/client';
-import { EntryMenu, editorPathFromLocation } from './Workspace';
+import { EntryMenu, editorPathFromLocation, entryKindLabel } from './Workspace';
 import { entryMenuActions } from './entryActions';
 
 const file: FileEntry = {
@@ -30,6 +30,15 @@ describe('editor route parsing', () => {
   it('does not treat a directory route or malformed escape as an editor path', () => {
     expect(editorPathFromLocation({ pathname: '/fileharbor/d/docs/report.txt' })).toBeNull();
     expect(editorPathFromLocation({ pathname: '/fileharbor/edit/%E0%A4%A' })).toBeNull();
+  });
+});
+
+describe('entry kind labels', () => {
+  it('uses localised visible labels rather than raw API kinds', () => {
+    const labels: Record<string, string> = { 'workspace.file': 'File', 'workspace.folder': 'Folder' };
+    const t = (key: string) => labels[key];
+    expect(entryKindLabel('file', t)).toBe('File');
+    expect(entryKindLabel('directory', t)).toBe('Folder');
   });
 });
 

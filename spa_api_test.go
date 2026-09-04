@@ -46,7 +46,7 @@ func TestEmbeddedSPAShellAndAssets(t *testing.T) {
 	if !bytes.Contains(response.Body.Bytes(), []byte("/fileharbor/assets/"+entryAsset)) || bytes.Contains(response.Body.Bytes(), []byte("fileharbor-csrf")) || !bytes.Contains(response.Body.Bytes(), []byte("fileharbor-nonce")) || !bytes.Contains(response.Body.Bytes(), []byte("fileharbor-login-next")) {
 		t.Fatalf("shell metadata or embedded asset reference is invalid: %s", response.Body.String())
 	}
-	if !strings.Contains(body, `localStorage.getItem("fileharbor-mode")`) || !strings.Contains(body, `data-mui-color-scheme`) || !strings.Contains(body, `nonce="`) {
+	if !strings.Contains(body, `localStorage.getItem("fileharbor-mode")`) || !strings.Contains(body, `data-mui-color-scheme`) || !strings.Contains(body, `nonce="`) || !strings.Contains(body, `#171D18`) || !strings.Contains(body, `#F3F0E7`) {
 		t.Fatalf("shell theme bootstrap is invalid: %s", body)
 	}
 	prepaint := strings.Index(body, `localStorage.getItem("fileharbor-mode")`)
