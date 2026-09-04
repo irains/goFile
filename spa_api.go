@@ -5,11 +5,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/irains/fileharbor/auth"
@@ -69,6 +67,7 @@ type listingEntry struct {
 	Extension   string `json:"extension,omitempty"`
 	IsArchive   bool   `json:"is_archive"`
 	Previewable bool   `json:"previewable"`
+	Editable    bool   `json:"editable"`
 	Version     string `json:"version"`
 }
 
@@ -226,6 +225,7 @@ func listingHandler(manager *auth.Manager, state *RuntimeState) gin.HandlerFunc 
 		entries := make([]listingEntry, 0, len(info.Entries))
 		listingItems := make([]auth.ListingItem, 0, len(info.Entries))
 		for _, entry := range info.Entries {
+			editable := entry.Kind == "file" && entry.Size <= maxEditorBytes && utils.IsTextFile(entry.Path, maxEditorBytes)
 			entries = append(entries, listingEntry{
 				Name:        entry.Name,
 				Path:        entry.Path,
@@ -236,6 +236,7 @@ func listingHandler(manager *auth.Manager, state *RuntimeState) gin.HandlerFunc 
 				Extension:   entry.Extension,
 				IsArchive:   entry.IsArchive,
 				Previewable: entry.Kind == "file" && isInlinePreviewable(entry.Name),
+				Editable:    editable,
 				Version:     entry.Version,
 			})
 			listingItems = append(listingItems, auth.ListingItem{Name: entry.Name, Version: entry.Version})
@@ -271,38 +272,16 @@ func listingHandler(manager *auth.Manager, state *RuntimeState) gin.HandlerFunc 
 func editorContentHandler(state *RuntimeState) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		setPrivateResponse(c)
-		absolute, rel, info, err := fileForRead(c.Query("path"))
+		file, err := utils.ReadTextFile(pathFromParam(c.Query("path")), maxEditorBytes)
 		if err != nil {
 			jsonError(c, operationStatus(err), err)
 			return
 		}
-		if info.Size() > maxEditorBytes {
-			jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
-			return
-		}
-		data, err := readEditorFile(absolute)
-		if err != nil {
-			jsonError(c, http.StatusInternalServerError, errors.New("io"))
-			return
-		}
-		if int64(len(data)) > maxEditorBytes {
-			jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
-			return
-		}
-		_ = logAction(state, c, "file.edit", rel)
+		_ = logAction(state, c, "file.edit", file.Relative)
 		c.JSON(http.StatusOK, editorContentResponse{OK: true, Editor: editorPayload{
-			Path: rel, Name: filepath.Base(rel), Content: string(data), SizeBytes: info.Size(), ModifiedAt: info.ModTime().UTC().Format(timeFormat), Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(rel)), "."), Version: utils.EntryVersion(info),
+			Path: file.Relative, Name: filepath.Base(file.Relative), Content: string(file.Data), SizeBytes: file.Info.Size(), ModifiedAt: file.Info.ModTime().UTC().Format(timeFormat), Extension: strings.TrimPrefix(strings.ToLower(filepath.Ext(file.Relative)), "."), Version: utils.EntryVersion(file.Info),
 		}})
 	}
-}
-
-func readEditorFile(absolute string) ([]byte, error) {
-	file, err := os.Open(absolute)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	return io.ReadAll(io.LimitReader(file, maxEditorBytes+1))
 }
 
 func editorSaveHandler(state *RuntimeState) gin.HandlerFunc {
@@ -317,7 +296,7 @@ func editorSaveHandler(state *RuntimeState) gin.HandlerFunc {
 			jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
 			return
 		}
-		if request.ExpectedVersion == "" || !utf8.ValidString(request.Content) {
+		if request.ExpectedVersion == "" || !utils.IsTextContent([]byte(request.Content)) {
 			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "code": "invalid_request"})
 			return
 		}
@@ -329,7 +308,7 @@ func editorSaveHandler(state *RuntimeState) gin.HandlerFunc {
 		if !requireAudit(c, state, "file.save", rel, 1) {
 			return
 		}
-		updated, err := utils.WriteVersionedFile(request.Path, request.ExpectedVersion, []byte(request.Content))
+		updated, err := utils.WriteVersionedTextFile(pathFromParam(request.Path), request.ExpectedVersion, []byte(request.Content), maxEditorBytes)
 		if err != nil {
 			jsonError(c, operationStatus(err), err)
 			return

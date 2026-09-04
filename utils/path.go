@@ -27,6 +27,7 @@ var (
 	ErrSelfDescendant     = &OperationError{Code: "self_descendant"}
 	ErrInvalidName        = &OperationError{Code: "invalid_name"}
 	ErrUnsupportedType    = &OperationError{Code: "unsupported_file_type"}
+	ErrInvalidTextContent = &OperationError{Code: "invalid_text_content"}
 	ErrSourceChanged      = &OperationError{Code: "source_changed"}
 	ErrBatchLimitExceeded = &OperationError{Code: "batch_limit_exceeded"}
 )

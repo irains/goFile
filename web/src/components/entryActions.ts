@@ -37,7 +37,7 @@ export type EntryAction = {
 export const entryActions: EntryAction[] = [
   { name: 'download', icon: DownloadOutlined, visible: (entry) => entry.kind === 'file' },
   { name: 'preview', icon: VisibilityOutlined, visible: (entry) => entry.kind === 'file' && entry.previewable },
-  { name: 'edit', icon: EditOutlined, visible: (entry) => entry.kind === 'file' },
+  { name: 'edit', icon: EditOutlined, visible: (entry) => entry.kind === 'file' && entry.editable },
   { name: 'properties', icon: InfoOutlined, visible: () => true },
   { name: 'rename', icon: DriveFileRenameOutline, visible: () => true },
   { name: 'move', icon: DriveFileMoveOutlined, visible: () => true },

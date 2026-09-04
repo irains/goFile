@@ -589,17 +589,17 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 	protected.Use(authRequired(manager))
 	protected.GET("/", func(c *gin.Context) { renderDirectory(c, state, "") })
 	protected.GET("/edit/*path", func(c *gin.Context) {
-		_, rel, info, err := fileForRead(c.Param("path"))
+		file, err := utils.ReadTextFile(pathFromParam(c.Param("path")), maxEditorBytes)
 		if err != nil {
+			if utils.ErrorCode(err) == "batch_limit_exceeded" {
+				setPrivateResponse(c)
+				jsonError(c, http.StatusRequestEntityTooLarge, err)
+				return
+			}
 			hiddenNotFound(c)
 			return
 		}
-		if info.Size() > maxEditorBytes {
-			setPrivateResponse(c)
-			jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
-			return
-		}
-		_ = logAction(state, c, "file.edit", rel)
+		_ = logAction(state, c, "file.edit", file.Relative)
 		serveShell(c, bundle)
 	})
 	protected.GET("/d/*path", func(c *gin.Context) {
@@ -1099,35 +1099,6 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 				return
 			}
 			if !finishMutation(c, state, "archive.extract", rel, 1) {
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"ok": true})
-		})
-		mutations.POST("/do/save", func(c *gin.Context) {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxEditorBytes+64<<10)
-			if err := c.Request.ParseForm(); err != nil {
-				multipartError(c, err, utils.ErrInvalidPath)
-				return
-			}
-			path := c.Request.PostForm.Get("path")
-			data := c.Request.PostForm.Get("data")
-			if int64(len(data)) > maxEditorBytes {
-				jsonError(c, http.StatusRequestEntityTooLarge, utils.ErrBatchLimitExceeded)
-				return
-			}
-			absolute, rel, _, err := fileForRead(path)
-			if err != nil {
-				jsonError(c, operationStatus(err), err)
-				return
-			}
-			if !requireAudit(c, state, "file.save", rel, 1) {
-				return
-			}
-			if err := os.WriteFile(absolute, []byte(data), 0644); err != nil {
-				jsonError(c, http.StatusInternalServerError, errors.New("io"))
-				return
-			}
-			if !finishMutation(c, state, "file.save", rel, 1) {
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"ok": true})

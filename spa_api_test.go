@@ -162,10 +162,11 @@ func TestReactSessionListingAndEditorAPIs(t *testing.T) {
 				Path        string `json:"path"`
 				Version     string `json:"version"`
 				Previewable bool   `json:"previewable"`
+				Editable    bool   `json:"editable"`
 			} `json:"entries"`
 		} `json:"directory"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &listing); err != nil || !listing.OK || listing.Directory.Path != "" || listing.Directory.ParentPath != nil || listing.Directory.ListingToken == "" || len(listing.Directory.Entries) != 1 || listing.Directory.Entries[0].Path != "notes.txt" || listing.Directory.Entries[0].Version == "" || !listing.Directory.Entries[0].Previewable {
+	if err := json.Unmarshal(response.Body.Bytes(), &listing); err != nil || !listing.OK || listing.Directory.Path != "" || listing.Directory.ParentPath != nil || listing.Directory.ListingToken == "" || len(listing.Directory.Entries) != 1 || listing.Directory.Entries[0].Path != "notes.txt" || listing.Directory.Entries[0].Version == "" || !listing.Directory.Entries[0].Previewable || !listing.Directory.Entries[0].Editable {
 		t.Fatalf("listing response = %s, %v", response.Body.String(), err)
 	}
 
@@ -210,5 +211,71 @@ func TestReactSessionListingAndEditorAPIs(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("stale editor PUT = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestEditorRejectsBinaryContent(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
+	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
+	})
+	original := []byte("before\x00after")
+	if err := os.WriteFile(filepath.Join(conf.FileHarbor, "binary.txt"), original, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := testManager(t)
+	router := newTestRouter(t, manager)
+	cookie := loginCookie(t, router)
+	csrf := sessionCSRF(t, manager, cookie)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/listing", nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("listing = %d: %s", response.Code, response.Body.String())
+	}
+	var listing struct {
+		Directory struct {
+			Entries []struct {
+				Path     string `json:"path"`
+				Editable bool   `json:"editable"`
+			} `json:"entries"`
+		} `json:"directory"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &listing); err != nil || len(listing.Directory.Entries) != 1 || listing.Directory.Entries[0].Path != "binary.txt" || listing.Directory.Entries[0].Editable {
+		t.Fatalf("binary listing response = %s, %v", response.Body.String(), err)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/edit/binary.txt", nil)
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("binary editor shell = %d: %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/editor/content?path=binary.txt", nil)
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"unsupported_file_type"`)) {
+		t.Fatalf("binary editor GET = %d: %s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPut, "/api/editor/content", strings.NewReader(`{"path":"binary.txt","content":"replacement","expected_version":"any"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-CSRF-Token", csrf)
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"unsupported_file_type"`)) {
+		t.Fatalf("binary editor PUT = %d: %s", response.Code, response.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(conf.FileHarbor, "binary.txt"))
+	if err != nil || !bytes.Equal(data, original) {
+		t.Fatalf("binary editor save modified data = %q, %v", data, err)
 	}
 }

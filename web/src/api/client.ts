@@ -69,6 +69,7 @@ export interface FileEntry {
   extension?: string;
   isArchive: boolean;
   previewable: boolean;
+  editable: boolean;
   version: string;
 }
 
@@ -88,6 +89,7 @@ export interface ListingResponse {
       extension?: string;
       is_archive: boolean;
       previewable: boolean;
+      editable: boolean;
       version: string;
     }>;
     truncated: boolean;
@@ -120,6 +122,7 @@ export function normalizeListing(response: ListingResponse): DirectoryListing {
       extension: entry.extension,
       isArchive: entry.is_archive,
       previewable: entry.previewable,
+      editable: entry.editable,
       version: entry.version
     })),
     disk: response.disk && {

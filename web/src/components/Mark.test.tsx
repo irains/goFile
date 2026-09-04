@@ -8,12 +8,17 @@ describe('Mark', () => {
     const svg = container.querySelector('svg');
     expect(svg).toBeTruthy();
     expect(svg?.getAttribute('stroke')).toBe('currentColor');
+    expect(svg?.getAttribute('stroke-width')).toBe('1.75');
+    expect(svg?.getAttribute('width')).toBe('24');
+    expect(svg?.getAttribute('height')).toBe('24');
+    expect(svg?.querySelectorAll('path')).toHaveLength(4);
   });
 
   it('inherits color by default and accepts valid CSS colors', () => {
     const { container, rerender } = render(<Mark size={32} />);
     const svg = container.querySelector('svg') as SVGElement;
-    expect(svg.style.fontSize).toBe('32px');
+    expect(svg.getAttribute('width')).toBe('32');
+    expect(svg.getAttribute('height')).toBe('32');
     expect(svg.style.color).toBe('currentcolor');
 
     rerender(<Mark size={32} color="var(--mui-palette-primary-main)" />);

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { I18nProvider } from '../i18n';
 import type { FileEntry } from '../api/client';
-import { EntryMenu, editorPathFromLocation, entryKindLabel } from './Workspace';
+import { EntryMenu, directoryPathForEditor, editorPathFromLocation, entryKindLabel } from './Workspace';
 import { entryMenuActions } from './entryActions';
 
 const file: FileEntry = {
@@ -15,6 +15,7 @@ const file: FileEntry = {
   extension: 'txt',
   isArchive: false,
   previewable: true,
+  editable: true,
   version: 'v1'
 };
 
@@ -31,6 +32,11 @@ describe('editor route parsing', () => {
     expect(editorPathFromLocation({ pathname: '/fileharbor/d/docs/report.txt' })).toBeNull();
     expect(editorPathFromLocation({ pathname: '/fileharbor/edit/%E0%A4%A' })).toBeNull();
   });
+
+  it('returns the edited file directory when closing a deep link', () => {
+    expect(directoryPathForEditor('docs/June report.txt', { pathname: '/fileharbor/edit/docs/June%20report.txt' })).toBe('docs');
+    expect(directoryPathForEditor('notes.txt', { pathname: '/fileharbor/edit/notes.txt' })).toBe('');
+  });
 });
 
 describe('entry kind labels', () => {
@@ -45,6 +51,10 @@ describe('entry kind labels', () => {
 describe('entry menu actions', () => {
   it('retains only safe actions in restricted workspaces', () => {
     expect(entryMenuActions(file, false, false).map(({ name }) => name)).toEqual(['download', 'preview', 'properties']);
+  });
+
+  it('hides Edit for files that are not textual', () => {
+    expect(entryMenuActions({ ...file, editable: false }, true, true).map(({ name }) => name)).not.toContain('edit');
   });
 
   it('marks Delete as the only destructive action', () => {

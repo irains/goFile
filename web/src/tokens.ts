@@ -205,7 +205,7 @@ export function createAppTheme() {
             minHeight: 40,
             borderRadius: radii.sm,
             transition: controlTransition,
-            '&:hover': { backgroundColor: theme.palette.action.hover, boxShadow: `0 2px 8px ${theme.palette.mode === 'light' ? 'rgba(54, 63, 45, 0.1)' : 'rgba(0, 0, 0, 0.22)'}` },
+            '&:hover': { backgroundColor: 'var(--mui-palette-action-hover)', boxShadow: `0 2px 8px ${theme.palette.mode === 'light' ? 'rgba(54, 63, 45, 0.1)' : 'rgba(0, 0, 0, 0.22)'}` },
             '&:active': { transform: 'translateY(1px)', boxShadow: 'none' }
           }),
           sizeSmall: { minWidth: 32, minHeight: 32, ...compactTouchTarget }
@@ -232,13 +232,13 @@ export function createAppTheme() {
           notchedOutline: { borderColor: 'var(--mui-palette-divider)' }
         }
       },
-      MuiTableCell: { styleOverrides: { head: ({ theme }) => ({ backgroundColor: theme.palette.background.paper, color: theme.palette.text.secondary, fontWeight: 700 }) } },
+      MuiTableCell: { styleOverrides: { head: { backgroundColor: 'var(--mui-palette-background-paper)', color: 'var(--mui-palette-text-secondary)', fontWeight: 700 } } },
       MuiTableRow: {
         styleOverrides: {
           root: ({ theme }) => ({
             transition: theme.transitions.create(['background-color', 'box-shadow'], { duration: theme.transitions.duration.short }),
-            '&.Mui-selected': { backgroundColor: theme.palette.action.selected },
-            '&.MuiTableRow-hover:hover': { backgroundColor: theme.palette.action.hover }
+            '&.Mui-selected': { backgroundColor: 'var(--mui-palette-action-selected)' },
+            '&.MuiTableRow-hover:hover': { backgroundColor: 'var(--mui-palette-action-hover)' }
           })
         }
       },

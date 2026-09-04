@@ -161,8 +161,9 @@ func TestDirectoryListingShellAndAPI(t *testing.T) {
 	var body struct {
 		OK        bool `json:"ok"`
 		Directory struct {
-			Path         string `json:"path"`
-			ListingToken string `json:"listing_token"`
+			Path         string  `json:"path"`
+			ParentPath   *string `json:"parent_path"`
+			ListingToken string  `json:"listing_token"`
 			Entries      []struct {
 				Name string `json:"name"`
 				Path string `json:"path"`
@@ -172,7 +173,7 @@ func TestDirectoryListingShellAndAPI(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.OK || body.Directory.Path != "nested" || body.Directory.ListingToken == "" || len(body.Directory.Entries) != 2 || body.Directory.Entries[0].Path != "nested/empty" || body.Directory.Entries[1].Name != "document.txt" {
+	if !body.OK || body.Directory.Path != "nested" || body.Directory.ParentPath == nil || *body.Directory.ParentPath != "" || body.Directory.ListingToken == "" || len(body.Directory.Entries) != 2 || body.Directory.Entries[0].Path != "nested/empty" || body.Directory.Entries[1].Name != "document.txt" {
 		t.Fatalf("nested listing response = %#v", body)
 	}
 }

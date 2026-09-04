@@ -11,7 +11,7 @@ import {
   DownloadOutlined,
   Folder,
   FolderOffOutlined,
-  FolderOpen,
+  KeyboardArrowUp,
   InfoOutlined,
   LightModeOutlined,
   LogoutOutlined,
@@ -76,9 +76,9 @@ const fmtDate = (value: string | number) => value ? new Date(value).toLocaleStri
 const navigateDirectory = (path: string) => { window.location.assign(itemUrl('d', path)); };
 export const entryKindLabel = (kind: FileEntry['kind'], t: (key: string) => string) => t(kind === 'directory' ? 'workspace.folder' : 'workspace.file');
 
-function directoryPathFromLocation(): string {
+function directoryPathFromLocation(location: Pick<Location, 'pathname'> = window.location): string {
   const base = itemUrl('d', '').replace(/\/$/, '');
-  const pathname = window.location.pathname.replace(/\/$/, '');
+  const pathname = location.pathname.replace(/\/$/, '');
   if (pathname === base || pathname === `${base}/d`) return '';
   const prefix = `${base}/d/`;
   if (!pathname.startsWith(prefix)) return '';
@@ -96,6 +96,14 @@ export function editorPathFromLocation(location: Pick<Location, 'pathname'> = wi
   } catch {
     return null;
   }
+}
+
+export function directoryPathForEditor(editorPath: string | null, location: Pick<Location, 'pathname'> = window.location): string {
+  if (editorPath) {
+    const segments = editorPath.split('/').filter(Boolean);
+    return segments.slice(0, -1).join('/');
+  }
+  return directoryPathFromLocation(location);
 }
 
 function AppearanceToggle() {
@@ -116,19 +124,11 @@ function AppearanceToggle() {
   );
 }
 
-function RowActions({ entry, compact, onAction, onMenu }: { entry: FileEntry; compact: boolean; onAction: (name: EntryActionName) => void; onMenu: (event: React.MouseEvent<HTMLElement>) => void }) {
+function RowActions({ entry, mutable, editorAvailable, onAction, onMenu }: { entry: FileEntry; mutable: boolean; editorAvailable: boolean; onAction: (name: EntryActionName) => void; onMenu: (event: React.MouseEvent<HTMLElement>) => void }) {
   const { t } = useI18n();
-  const visible = compact ? [] : hoverActionNames.filter((name) => {
-    const action = entryMenuActions(entry, true, true).find((item) => item.name === name);
-    return Boolean(action);
-  });
+  const visible = hoverActionNames.filter((name) => entryMenuActions(entry, mutable, editorAvailable).some((action) => action.name === name));
   return (
-    <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end" sx={(theme) => ({
-      opacity: 0,
-      transition: theme.transitions.create('opacity', { duration: theme.transitions.duration.short }),
-      '&:hover, &:focus-within': { opacity: 1 },
-      '@media (hover: none)': { opacity: 1 }
-    })}>
+    <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
       {visible.map((name) => {
         const Icon = name === 'download' ? DownloadOutlined : InfoOutlined;
         const label = t(`action.${name}`);
@@ -160,12 +160,14 @@ export function Workspace() {
   const [form, setForm] = useState<FormState>(null);
   const [propertiesFor, setPropertiesFor] = useState<FileEntry | null>(null);
   const [editorFor, setEditorFor] = useState<FileEntry | null>(null);
-  const editorPath = editorPathFromLocation();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [routePathname, setRoutePathname] = useState(() => window.location.pathname);
+  const editorPath = editorPathFromLocation({ pathname: routePathname });
+  const currentPath = directoryPathForEditor(editorPath, { pathname: routePathname });
   const [showUploads, setShowUploads] = useState(false);
   const [notice, setNotice] = useState<{ message: string; severity: AlertColor } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ type: 'single'; entry: FileEntry } | { type: 'batch'; entries: FileEntry[] } | null>(null);
   const compact = useMediaQuery(theme.breakpoints.down('md'));
-  const currentPath = directoryPathFromLocation();
   const listingQuery = useQuery({ queryKey: ['listing', currentPath], queryFn: () => api.getListing(currentPath) });
   const listing = listingQuery.data;
   const entries = listing?.entries ?? [];
@@ -179,9 +181,12 @@ export function Workspace() {
     extension: '',
     isArchive: false,
     previewable: false,
+    editable: true,
     version: ''
   } : null;
   const activeEditor = editorFor ?? routeEditor;
+  const isEditorOpen = editorOpen || Boolean(editorPath);
+  const editorReturnPath = editorPath ? directoryPathForEditor(editorPath) : currentPath;
   const mutable = Boolean(session?.capabilities.mutate);
   const canUpload = Boolean(session?.capabilities.upload);
 
@@ -204,6 +209,11 @@ export function Workspace() {
   });
   const propertyQuery = useQuery({ queryKey: ['properties', propertiesFor?.path], queryFn: () => api.getProperties(propertiesFor!.path), enabled: Boolean(propertiesFor) });
 
+  useEffect(() => {
+    const updateRoute = () => setRoutePathname(window.location.pathname);
+    window.addEventListener('popstate', updateRoute);
+    return () => window.removeEventListener('popstate', updateRoute);
+  }, []);
   useEffect(() => { setSelected(new Set()); }, [listing?.listingToken]);
   const select = (entry: FileEntry, checked: boolean) => setSelected((previous) => { const next = new Set(previous); if (checked) next.add(entry.path); else next.delete(entry.path); return next; });
   const selectedEntries = entries.filter((entry) => selected.has(entry.path));
@@ -212,7 +222,7 @@ export function Workspace() {
   const performEntryAction = (action: EntryActionName, entry: FileEntry) => {
     setMenuEntry(null); setMenuAnchor(null);
     if (action === 'properties') return setPropertiesFor(entry);
-    if (action === 'edit') return setEditorFor(entry);
+    if (action === 'edit') { setEditorFor(entry); setEditorOpen(true); return; }
     if (action === 'download') return window.location.assign(itemUrl('download', entry.path));
     if (action === 'preview') return window.location.assign(itemUrl('view', entry.path));
     if (action === 'rename') return setForm({ action: 'rename', entry });
@@ -244,7 +254,7 @@ export function Workspace() {
     <Stack component="main" sx={{ minHeight: '100dvh' }}>
       <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Toolbar sx={{ gap: 1.5, px: { xs: 2, sm: 3 } }}>
-          <Mark size={24} />
+          <Box sx={{ color: 'primary.main', lineHeight: 0 }}><Mark size={24} /></Box>
           <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
         </Toolbar>
       </AppBar>
@@ -312,6 +322,11 @@ export function Workspace() {
           {canUpload && <Button startIcon={<UploadFile />} variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button>}
         </Box>
         {listing.truncated && <Alert severity="warning">{t('workspace.truncated')}</Alert>}
+        {listing.parentPath !== null && (
+          <Paper sx={{ ...surface, px: 1, py: 0.5 }}>
+            <Button startIcon={<KeyboardArrowUp />} aria-label={t('workspace.parentDirectory')} onClick={() => navigateDirectory(listing.parentPath!)}>{t('workspace.upOneLevel')}</Button>
+          </Paper>
+        )}
         {selectedEntries.length > 0 && <Paper sx={{ ...surface, p: 1.25, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Typography variant="bodyStrong" sx={{ mr: 1 }}>{t('workspace.selected', { count: selectedEntries.length })}</Typography>
           {mutable && <Button size="small" startIcon={<Folder />} onClick={() => setForm({ action: 'move' })}>{t('action.move')}</Button>}
@@ -327,10 +342,9 @@ export function Workspace() {
               <TableCell>{t('workspace.name')}</TableCell>
               {!compact && <TableCell>{t('workspace.size')}</TableCell>}
               {!compact && <TableCell>{t('workspace.modified')}</TableCell>}
-              <TableCell align="right" sx={{ width: compact ? 112 : 160 }}>{t('workspace.actions')}</TableCell>
+              <TableCell align="right" sx={{ width: 160 }}>{t('workspace.actions')}</TableCell>
             </TableRow></TableHead>
             <TableBody>
-              {listing.parentPath !== null && <TableRow hover><TableCell padding="checkbox" /><TableCell colSpan={compact ? 2 : 4}><Button startIcon={<FolderOpen />} aria-label={t('workspace.parentDirectory')} onClick={() => navigateDirectory(listing.parentPath!)} sx={{ justifyContent: 'flex-start' }}>..</Button></TableCell></TableRow>}
               {entries.map((entry) => (
                 <TableRow hover key={entry.path} selected={selected.has(entry.path)}>
                   <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectItem', { name: entry.name })} checked={selected.has(entry.path)} onChange={(event) => select(entry, event.target.checked)} /></TableCell>
@@ -356,10 +370,11 @@ export function Workspace() {
                   </TableCell>
                   {!compact && <TableCell>{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : '—'}</TableCell>}
                   {!compact && <TableCell>{fmtDate(entry.modifiedAt)}</TableCell>}
-                  <TableCell align="right" sx={{ width: compact ? 112 : 160 }}>
+                  <TableCell align="right" sx={{ width: 160 }}>
                     <RowActions
                       entry={entry}
-                      compact={compact}
+                      mutable={mutable}
+                      editorAvailable={Boolean(session?.capabilities.editorSave || session?.capabilities.browse)}
                       onAction={(name) => performEntryAction(name, entry)}
                       onMenu={(event) => { setMenuEntry(entry); setMenuAnchor(event.currentTarget); }}
                     />
@@ -386,7 +401,7 @@ export function Workspace() {
     <EntryMenu entry={menuEntry} anchor={menuAnchor} onClose={() => { setMenuEntry(null); setMenuAnchor(null); }} onAction={performEntryAction} mutable={mutable} editorAvailable={Boolean(session?.capabilities.editorSave || session?.capabilities.browse)} />
     <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => mutation.mutate({ endpoint, values })} onBatchSubmit={doBatch} />
     <PropertiesDialog entry={propertiesFor} properties={propertyQuery.data?.properties} isLoading={propertyQuery.isLoading} onClose={() => setPropertiesFor(null)} />
-    {activeEditor && <Suspense fallback={<Stack role="status" aria-live="polite" alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}><LazyEditorDialog entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={() => { setEditorFor(null); if (editorPath) window.location.assign(itemUrl('d', '')); }} /></Suspense>}
+    {activeEditor && isEditorOpen && <Suspense fallback={<Stack role="status" aria-live="polite" alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}><LazyEditorDialog entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={() => { setEditorFor(null); setEditorOpen(false); if (editorPath) { const destination = itemUrl('d', editorReturnPath); window.history.replaceState(null, '', destination); setRoutePathname(destination); } }} /></Suspense>}
     {canUpload && <UploadQueueDrawer open={showUploads} onClose={() => setShowUploads(false)} destination={listing.path} username={session?.username ?? ''} onAllComplete={() => void refresh()} />}
     <DialogShell
       open={Boolean(pendingDelete)}

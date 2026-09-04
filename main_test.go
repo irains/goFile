@@ -535,7 +535,7 @@ func TestChunkMergeRequiresCompleteStableSet(t *testing.T) {
 	}
 }
 
-func TestEditorRejectsOversizedFilesAndSaves(t *testing.T) {
+func TestEditorRejectsOversizedAndLegacySaveRoutes(t *testing.T) {
 	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
 	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
 	t.Cleanup(func() {
@@ -566,12 +566,12 @@ func TestEditorRejectsOversizedFilesAndSaves(t *testing.T) {
 	request.AddCookie(cookie)
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("editor save status = %d: %s", response.Code, response.Body.String())
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("legacy editor save status = %d: %s", response.Code, response.Body.String())
 	}
 	data, err := os.ReadFile(filepath.Join(conf.FileHarbor, "notes.txt"))
-	if err != nil || string(data) != "after" {
-		t.Fatalf("editor save data = %q, %v", data, err)
+	if err != nil || string(data) != "before" {
+		t.Fatalf("legacy editor save modified data = %q, %v", data, err)
 	}
 }
 

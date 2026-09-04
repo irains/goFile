@@ -7,25 +7,22 @@ export type MarkProps = {
   title?: string;
 };
 
-// Single-stroke harbor mark: two pilings under a horizontal cap.
+// Two-piling harbor mark, optically centered for compact application rails.
 // The SVG inherits a valid CSS color from its parent by default.
 export function Mark({ size = 24, color = 'currentColor', className, title }: MarkProps) {
   const style: CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
+    display: 'block',
     color,
-    fontSize: `${size}px`,
-    lineHeight: 0,
-    verticalAlign: 'middle'
+    flex: '0 0 auto'
   };
   return (
     <svg
       viewBox="0 0 24 24"
-      width="1em"
-      height="1em"
+      width={size}
+      height={size}
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
@@ -35,11 +32,10 @@ export function Mark({ size = 24, color = 'currentColor', className, title }: Ma
       aria-hidden={title ? undefined : true}
     >
       {title && <title>{title}</title>}
-      <path d="M3 9 H21" />
-      <path d="M6 9 V19" />
-      <path d="M11 9 V19" />
-      <path d="M16 9 V19" />
-      <path d="M3 21 H21" />
+      <path d="M4 7 H20" />
+      <path d="M7 7 V17" />
+      <path d="M17 7 V17" />
+      <path d="M4 19 H20" />
     </svg>
   );
 }

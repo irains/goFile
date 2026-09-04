@@ -107,6 +107,26 @@ describe('design tokens', () => {
     expect(outlinedInput?.notchedOutline).toMatchObject({ borderColor: 'var(--mui-palette-divider)' });
   });
 
+  it('keeps table controls bound to the active color-scheme variables', () => {
+    const theme = createAppTheme();
+    const tableCell = theme.components?.MuiTableCell?.styleOverrides;
+    const tableRow = theme.components?.MuiTableRow?.styleOverrides;
+    const iconButton = theme.components?.MuiIconButton?.styleOverrides;
+    const tableRowRoot = tableRow?.root as ((props: { theme: typeof theme }) => Record<string, unknown>);
+    const iconButtonRoot = iconButton?.root as ((props: { theme: typeof theme }) => Record<string, unknown>);
+    expect(tableCell?.head).toMatchObject({
+      backgroundColor: 'var(--mui-palette-background-paper)',
+      color: 'var(--mui-palette-text-secondary)'
+    });
+    expect(tableRowRoot({ theme })).toMatchObject({
+      '&.Mui-selected': { backgroundColor: 'var(--mui-palette-action-selected)' },
+      '&.MuiTableRow-hover:hover': { backgroundColor: 'var(--mui-palette-action-hover)' }
+    });
+    expect(iconButtonRoot({ theme })).toMatchObject({
+      '&:hover': { backgroundColor: 'var(--mui-palette-action-hover)' }
+    });
+  });
+
   it('keeps normal controls comfortable and table controls dense', () => {
     const theme = createAppTheme();
     const button = theme.components?.MuiButton?.styleOverrides;

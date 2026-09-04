@@ -22,10 +22,10 @@ describe('API client', () => {
   it('normalizes server bootstrap and listing DTOs', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, session: { username: 'admin', csrf_token: 'csrf', expires_at: '2026-08-30T12:00:00Z' }, base_path: '/fileharbor', locale: 'zh-CN', capabilities: { browse: true, upload: true, mutate: false, editor_save: false } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, directory: { path: 'docs', parent_path: '', listing_token: 'token', entries: [{ name: 'notes.txt', path: 'docs/notes.txt', kind: 'file', size_bytes: 3, modified_at: '2026-08-30T12:00:00Z', mode: '-rw-r--r--', is_archive: false, previewable: true, version: 'v' }], truncated: false } }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, directory: { path: 'docs', parent_path: '', listing_token: 'token', entries: [{ name: 'notes.txt', path: 'docs/notes.txt', kind: 'file', size_bytes: 3, modified_at: '2026-08-30T12:00:00Z', mode: '-rw-r--r--', is_archive: false, previewable: true, editable: true, version: 'v' }], truncated: false } }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await expect(api.login('admin', 'password')).resolves.toMatchObject({ username: 'admin', language: 'zh', capabilities: { editorSave: false } });
-    await expect(api.getListing('docs')).resolves.toMatchObject({ path: 'docs', parentPath: '', listingToken: 'token', entries: [{ sizeBytes: 3, previewable: true }] });
+    await expect(api.getListing('docs')).resolves.toMatchObject({ path: 'docs', parentPath: '', listingToken: 'token', entries: [{ sizeBytes: 3, previewable: true, editable: true }] });
   });
 
   it('uses stable server error codes', async () => {
