@@ -65,6 +65,17 @@ func TestEmbeddedSPAShellAndAssets(t *testing.T) {
 		t.Fatalf("asset response = %d, cache %q", response.Code, response.Header().Get("Cache-Control"))
 	}
 
+	logoManifest, ok := bundle.manifest["src/assets/fileharbor-logo.svg"]
+	if !ok {
+		t.Fatal("embedded web manifest has no FileHarbor logo asset")
+	}
+	request = httptest.NewRequest(http.MethodGet, "/fileharbor/assets/"+logoManifest.File, nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/svg+xml" || response.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		t.Fatalf("logo asset response = %d, type %q, cache %q", response.Code, response.Header().Get("Content-Type"), response.Header().Get("Cache-Control"))
+	}
+
 	for _, privateAsset := range []string{"manifest.json", "index.html"} {
 		request = httptest.NewRequest(http.MethodGet, "/fileharbor/assets/"+privateAsset, nil)
 		response = httptest.NewRecorder()

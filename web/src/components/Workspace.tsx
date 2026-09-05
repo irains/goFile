@@ -75,6 +75,20 @@ const fmtBytes = (value: number) => new Intl.NumberFormat(undefined, { style: 'u
 const fmtDate = (value: string | number) => value ? new Date(value).toLocaleString() : '—';
 const navigateDirectory = (path: string) => { window.location.assign(itemUrl('d', path)); };
 export const entryKindLabel = (kind: FileEntry['kind'], t: (key: string) => string) => t(kind === 'directory' ? 'workspace.folder' : 'workspace.file');
+export const desktopTableColumnSx = {
+  name: { width: '100%' },
+  modified: { width: '1%', whiteSpace: 'nowrap' }
+} as const;
+export const fileNameButtonSx = {
+  appearance: 'none',
+  background: 'none',
+  border: 0,
+  p: 0,
+  textAlign: 'left',
+  cursor: 'pointer',
+  font: 'inherit',
+  overflowWrap: 'anywhere'
+} as const;
 
 function directoryPathFromLocation(location: Pick<Location, 'pathname'> = window.location): string {
   const base = itemUrl('d', '').replace(/\/$/, '');
@@ -254,7 +268,7 @@ export function Workspace() {
     <Stack component="main" sx={{ minHeight: '100dvh' }}>
       <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Toolbar sx={{ gap: 1.5, px: { xs: 2, sm: 3 } }}>
-          <Box sx={{ color: 'primary.main', lineHeight: 0 }}><Mark size={24} /></Box>
+          <Box sx={{ lineHeight: 0 }}><Mark size={24} /></Box>
           <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
         </Toolbar>
       </AppBar>
@@ -289,7 +303,7 @@ export function Workspace() {
   return <Box component="main" sx={{ minHeight: '100dvh' }}>
     <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
       <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
-        <Box sx={{ color: 'primary.main', lineHeight: 0 }}><Mark size={22} /></Box>
+        <Box sx={{ lineHeight: 0 }}><Mark size={22} /></Box>
         <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
         <Tooltip title={t('workspace.refresh')}><IconButton aria-label={t('workspace.refresh')} onClick={() => void refresh()}><Refresh /></IconButton></Tooltip>
         <AppearanceToggle />
@@ -339,9 +353,9 @@ export function Workspace() {
           <Table stickyHeader size={compact ? 'small' : 'medium'} aria-label={t('app.workspace')}>
             <TableHead><TableRow>
               <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectAll')} checked={entries.length > 0 && selected.size === entries.length} indeterminate={selected.size > 0 && selected.size < entries.length} onChange={(event) => setSelected(event.target.checked ? new Set(entries.map((entry) => entry.path)) : new Set())} /></TableCell>
-              <TableCell>{t('workspace.name')}</TableCell>
+              <TableCell sx={desktopTableColumnSx.name}>{t('workspace.name')}</TableCell>
               {!compact && <TableCell>{t('workspace.size')}</TableCell>}
-              {!compact && <TableCell>{t('workspace.modified')}</TableCell>}
+              {!compact && <TableCell sx={desktopTableColumnSx.modified}>{t('workspace.modified')}</TableCell>}
               <TableCell align="right" sx={{ width: 160 }}>{t('workspace.actions')}</TableCell>
             </TableRow></TableHead>
             <TableBody>
@@ -360,7 +374,7 @@ export function Workspace() {
                           onClick={() => entry.kind === 'directory' ? navigateDirectory(entry.path) : window.location.assign(itemUrl('download', entry.path))}
                           color="inherit"
                           fontWeight={entry.kind === 'directory' ? 700 : 500}
-                          sx={{ appearance: 'none', background: 'none', border: 0, p: 0, textAlign: 'left', cursor: 'pointer', font: 'inherit', overflowWrap: 'anywhere' }}
+                          sx={fileNameButtonSx}
                         >
                           {entry.name}
                         </Typography>
@@ -369,7 +383,7 @@ export function Workspace() {
                     </Stack>
                   </TableCell>
                   {!compact && <TableCell>{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : '—'}</TableCell>}
-                  {!compact && <TableCell>{fmtDate(entry.modifiedAt)}</TableCell>}
+                  {!compact && <TableCell sx={desktopTableColumnSx.modified}>{fmtDate(entry.modifiedAt)}</TableCell>}
                   <TableCell align="right" sx={{ width: 160 }}>
                     <RowActions
                       entry={entry}

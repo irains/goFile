@@ -39,7 +39,7 @@ export function LoginPage() {
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
           <Stack spacing={3} component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
             <Stack spacing={1.5}>
-              <Box sx={{ color: 'primary.main', lineHeight: 0 }}><Mark size={32} /></Box>
+              <Box sx={{ lineHeight: 0 }}><Mark size={32} /></Box>
               <Typography component="h1" variant="title">{t('login.title')}</Typography>
               <Typography variant="caption" color="text.secondary">{t('login.subtitle')}</Typography>
             </Stack>

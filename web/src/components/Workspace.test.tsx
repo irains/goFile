@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { I18nProvider } from '../i18n';
 import type { FileEntry } from '../api/client';
-import { EntryMenu, directoryPathForEditor, editorPathFromLocation, entryKindLabel } from './Workspace';
+import { EntryMenu, desktopTableColumnSx, directoryPathForEditor, editorPathFromLocation, entryKindLabel, fileNameButtonSx } from './Workspace';
 import { entryMenuActions } from './entryActions';
 
 const file: FileEntry = {
@@ -45,6 +45,16 @@ describe('entry kind labels', () => {
     const t = (key: string) => labels[key];
     expect(entryKindLabel('file', t)).toBe('File');
     expect(entryKindLabel('directory', t)).toBe('Folder');
+  });
+});
+
+describe('workspace table layout', () => {
+  it('preserves wrapping names while reserving only the natural modified-time width', () => {
+    expect(desktopTableColumnSx.name).toEqual({ width: '100%' });
+    expect(desktopTableColumnSx.modified).toEqual({ width: '1%', whiteSpace: 'nowrap' });
+    expect(fileNameButtonSx.overflowWrap).toBe('anywhere');
+    expect(fileNameButtonSx).not.toHaveProperty('textOverflow');
+    expect(fileNameButtonSx).not.toHaveProperty('whiteSpace');
   });
 });
 
