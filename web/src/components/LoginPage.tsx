@@ -12,6 +12,7 @@ import { surface } from '../tokens';
 
 const loginSchema = z.object({ username: z.string().trim().min(1), password: z.string().min(1) });
 type LoginValues = z.infer<typeof loginSchema>;
+const loginInputLabelProps = { shrink: true, disableAnimation: true } as const;
 
 export function LoginPage() {
   const { t } = useI18n();
@@ -44,8 +45,8 @@ export function LoginPage() {
               <Typography variant="caption" color="text.secondary">{t('login.subtitle')}</Typography>
             </Stack>
             {serverError && <Alert severity="error">{serverError}</Alert>}
-            <Controller name="username" control={control} render={({ field }) => <TextField {...field} autoComplete="username" autoFocus label={t('login.username')} error={Boolean(errors.username)} helperText={errors.username ? t('login.usernameRequired') : undefined} fullWidth required />} />
-            <Controller name="password" control={control} render={({ field }) => <TextField {...field} type="password" autoComplete="current-password" label={t('login.password')} error={Boolean(errors.password)} helperText={errors.password ? t('login.passwordRequired') : undefined} fullWidth required />} />
+            <Controller name="username" control={control} render={({ field }) => <TextField {...field} autoComplete="username" autoFocus label={t('login.username')} slotProps={{ inputLabel: loginInputLabelProps }} error={Boolean(errors.username)} helperText={errors.username ? t('login.usernameRequired') : undefined} fullWidth required />} />
+            <Controller name="password" control={control} render={({ field }) => <TextField {...field} type="password" autoComplete="current-password" label={t('login.password')} slotProps={{ inputLabel: loginInputLabelProps }} error={Boolean(errors.password)} helperText={errors.password ? t('login.passwordRequired') : undefined} fullWidth required />} />
             <Button type="submit" size="large" variant="contained" disabled={isSubmitting}>{t('login.signIn')}</Button>
           </Stack>
         </CardContent>

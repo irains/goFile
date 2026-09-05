@@ -65,13 +65,14 @@ import { EmptyState } from './EmptyState';
 import { UploadQueueDrawer } from './UploadQueueDrawer';
 import { nextThemeMode, type ThemeMode } from '../theme';
 import { entryMenuActions, hoverActionNames, type EntryAction, type EntryActionName } from './entryActions';
-import { fontFamilyMono, radii, surface } from '../tokens';
+import { formatBytes } from '../formatBytes';
+import { FolderDestinationPicker } from './FolderDestinationPicker';
+import { fontFamilyMono, surface } from '../tokens';
 
 const LazyEditorDialog = lazy(() => import('../editor/EditorDialog').then((module) => ({ default: module.EditorDialog })));
 type FormAction = 'newdir' | 'newfile' | 'rename' | 'move' | 'copy';
 type FormState = { action: FormAction; entry?: FileEntry } | null;
 
-const fmtBytes = (value: number) => new Intl.NumberFormat(undefined, { style: 'unit', unit: 'byte', notation: value > 1_000_000 ? 'compact' : 'standard', unitDisplay: 'narrow' }).format(value);
 const fmtDate = (value: string | number) => value ? new Date(value).toLocaleString() : '—';
 const navigateDirectory = (path: string) => { window.location.assign(itemUrl('d', path)); };
 export const entryKindLabel = (kind: FileEntry['kind'], t: (key: string) => string) => t(kind === 'directory' ? 'workspace.folder' : 'workspace.file');
@@ -378,11 +379,11 @@ export function Workspace() {
                         >
                           {entry.name}
                         </Typography>
-                        {compact && <Typography variant="caption" color="text.secondary" component="div">{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : entryKindLabel(entry.kind, t)} · {fmtDate(entry.modifiedAt)}</Typography>}
+                        {compact && <Typography variant="caption" color="text.secondary" component="div">{entry.kind === 'file' ? formatBytes(entry.sizeBytes) : entryKindLabel(entry.kind, t)} · {fmtDate(entry.modifiedAt)}</Typography>}
                       </Box>
                     </Stack>
                   </TableCell>
-                  {!compact && <TableCell>{entry.kind === 'file' ? fmtBytes(entry.sizeBytes) : '—'}</TableCell>}
+                  {!compact && <TableCell>{entry.kind === 'file' ? formatBytes(entry.sizeBytes) : '—'}</TableCell>}
                   {!compact && <TableCell sx={desktopTableColumnSx.modified}>{fmtDate(entry.modifiedAt)}</TableCell>}
                   <TableCell align="right" sx={{ width: 160 }}>
                     <RowActions
@@ -458,11 +459,24 @@ export function EntryMenu({ entry, anchor, onClose, onAction, mutable, editorAva
 }
 
 function EntryForm({ state, currentPath, selectedEntries, onClose, onSubmit, onBatchSubmit }: { state: FormState; currentPath: string; selectedEntries: FileEntry[]; onClose: () => void; onSubmit: (endpoint: string, values: Record<string, string>) => void; onBatchSubmit: (endpoint: string, destination?: string) => void }) {
-  const { t } = useI18n(); const [value, setValue] = useState(''); const [destination, setDestination] = useState(currentPath); const [picker, setPicker] = useState(false);
-  useEffect(() => { if (state) { setValue(state.entry?.name ?? ''); setDestination(currentPath); } }, [state, currentPath]);
+  const theme = useTheme();
+  const { t } = useI18n();
+  const [value, setValue] = useState('');
+  const [destination, setDestination] = useState(currentPath);
+  const fullScreenDestinationPicker = useMediaQuery(theme.breakpoints.down('sm'));
+
+  useEffect(() => {
+    if (state) {
+      setValue(state.entry?.name ?? '');
+      setDestination(currentPath);
+    }
+  }, [state, currentPath]);
+
   if (!state) return null;
   const title: Record<FormAction, string> = { newdir: t('dialog.newFolder'), newfile: t('dialog.newFile'), rename: t('dialog.rename'), move: t('action.move'), copy: t('action.copy') };
-  const isMultiple = !state.entry && ['move', 'copy'].includes(state.action);
+  const isDestinationAction = state.action === 'move' || state.action === 'copy';
+  const isMultiple = !state.entry && isDestinationAction;
+  const destinationIsSource = isDestinationAction && destination === currentPath;
   const submit = () => {
     if (state.action === 'newdir') onSubmit('do/newdir', { path: currentPath, dirname: value });
     else if (state.action === 'newfile') onSubmit('do/newfile', { path: currentPath, filename: value });
@@ -471,33 +485,25 @@ function EntryForm({ state, currentPath, selectedEntries, onClose, onSubmit, onB
     else if (state.entry) onSubmit(`do/${state.action}`, { path: state.entry.path, destination, ...(value && value !== state.entry.name ? { name: value } : {}) });
     onClose();
   };
-  return (
-    <DialogShell open onClose={onClose} title={title[state.action]} onConfirm={submit} confirmDisabled={(!isMultiple && !value.trim()) || ((state.action === 'move' || state.action === 'copy') && destination === currentPath)}>
-      {!isMultiple && <TextField autoFocus fullWidth required label={state.action === 'newdir' ? t('dialog.folderName') : state.action === 'newfile' ? t('dialog.fileName') : t('dialog.newName')} value={value} onChange={(event) => setValue(event.target.value)} />}
-      {(state.action === 'move' || state.action === 'copy') && <TextField fullWidth label={t('dialog.destination')} value={destination || t('workspace.root')} InputProps={{ readOnly: true, endAdornment: <Button onClick={() => setPicker(true)}>{t('action.chooseFolder')}</Button> }} />}
-      {isMultiple && <Typography color="text.secondary">{t('workspace.selected', { count: selectedEntries.length })}</Typography>}
-      <FolderPicker open={picker} initialPath={destination} onClose={() => setPicker(false)} onChoose={(path) => { setDestination(path); setPicker(false); }} />
-    </DialogShell>
-  );
-}
 
-function FolderPicker({ open, initialPath, onClose, onChoose }: { open: boolean; initialPath: string; onClose: () => void; onChoose: (path: string) => void }) {
-  const { t } = useI18n(); const [path, setPath] = useState(initialPath); const query = useQuery({ queryKey: ['directories', path], queryFn: () => api.getDirectories(path), enabled: open });
-  useEffect(() => { if (open) setPath(initialPath); }, [open, initialPath]);
   return (
-    <DialogShell open={open} onClose={onClose} title={t('dialog.destination')} onConfirm={() => onChoose(path)} confirmDisabled={path === initialPath}>
-      <Breadcrumbs sx={{ my: 1 }}>
-        <Button onClick={() => setPath('')} size="small">{t('workspace.root')}</Button>
-        {path.split('/').filter(Boolean).map((part, index, all) => (
-          <Button key={`${part}-${index}`} onClick={() => setPath(all.slice(0, index + 1).join('/'))} size="small">{part}</Button>
-        ))}
-      </Breadcrumbs>
-      <Box sx={{ minHeight: 200, border: '1px solid', borderColor: 'divider', borderRadius: radii.sm, p: 1, overflow: 'auto', maxHeight: 300 }}>
-        {query.isLoading && <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 120 }}><CircularProgress size={24} /></Stack>}
-        {query.data?.dirs.map((dir) => (
-          <Button key={dir.path} onClick={() => setPath(dir.path)} fullWidth sx={{ justifyContent: 'flex-start' }} startIcon={<Folder color="primary" />}>{dir.name}</Button>
-        ))}
-      </Box>
+    <DialogShell
+      open
+      onClose={onClose}
+      title={title[state.action]}
+      maxWidth={isDestinationAction ? 'sm' : 'xs'}
+      fullScreen={isDestinationAction && fullScreenDestinationPicker}
+      onConfirm={submit}
+      confirmLabel={isDestinationAction ? t(`action.${state.action}`) : undefined}
+      confirmDisabled={(!isMultiple && !value.trim()) || destinationIsSource}
+      contentSx={isDestinationAction ? { display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 } : undefined}
+      stackSx={isDestinationAction ? { minHeight: 0, flex: 1 } : undefined}
+      actionsSx={isDestinationAction ? { flexDirection: { xs: 'column-reverse', sm: 'row' }, gap: 1, '& > .MuiButton-root': { width: { xs: '100%', sm: 'auto' } } } : undefined}
+    >
+      {!isMultiple && <TextField autoFocus fullWidth required label={state.action === 'newdir' ? t('dialog.folderName') : state.action === 'newfile' ? t('dialog.fileName') : t('dialog.newName')} value={value} onChange={(event) => setValue(event.target.value)} />}
+      {isMultiple && <Typography color="text.secondary">{t('workspace.selected', { count: selectedEntries.length })}</Typography>}
+      {isDestinationAction && <FolderDestinationPicker value={destination} onChange={setDestination} />}
+      {destinationIsSource && <Alert severity="info">{t('error.destination_same_directory')}</Alert>}
     </DialogShell>
   );
 }
@@ -520,7 +526,7 @@ function PropertiesDialog({ entry, properties, isLoading, onClose }: { entry: Fi
       {properties && <Stack spacing={0} sx={{ mt: -1 }}>
         <DefinitionRow label={t('properties.type')} value={entryKindLabel(properties.kind, t)} />
         <DefinitionRow label={t('properties.location')} value={properties.path} mono />
-        <DefinitionRow label={t('properties.size')} value={fmtBytes(properties.size)} />
+        <DefinitionRow label={t('properties.size')} value={formatBytes(properties.size)} />
         <DefinitionRow label={t('properties.modified')} value={fmtDate(new Date(properties.modified * 1000).toISOString())} />
         <DefinitionRow label={t('properties.permissions')} value={properties.mode} mono />
         {properties.entry_count !== undefined && <DefinitionRow label={t('properties.contents')} value={properties.entry_count.toString()} />}
