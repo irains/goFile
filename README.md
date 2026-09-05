@@ -281,7 +281,7 @@ sudo bash fileharbor.sh
 
 ## 开发
 
-Go 没有 LTSC/LTS 发布通道。本项目目标为 Go 1.27.x，并应保持在该补丁线最新版本。React/Vite 前端源代码位于 `web/`，需要 Node 24；其构建产物在 `assets/web/` 中提交并由 Go 二进制嵌入。修改前端后必须重新构建并提交更新的 `assets/web/`，不要提交 `web/node_modules/`。
+Go 没有 LTSC/LTS 发布通道。本项目目标为 Go 1.27.x，并应保持在该补丁线最新版本。React/Vite 前端源代码位于 `web/`，需要 Node 24；其构建产物在 `assets/web/` 中提交并由 Go 二进制嵌入。`.gitattributes` 会将这两个目录中的文本文件固定为 LF，因为 Vite 会基于源文件字节生成资源哈希。修改前端后必须重新构建并提交更新的 `assets/web/`，不要提交 `web/node_modules/`。
 
 ```sh
 # 首次前端开发或 package-lock.json 变化后

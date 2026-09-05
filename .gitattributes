@@ -1,0 +1,3 @@
+# Vite hashes source bytes; keep frontend inputs and committed output LF everywhere.
+web/** text=auto eol=lf
+assets/web/** text=auto eol=lf
