@@ -28,7 +28,11 @@ export function UploadQueueDrawer({ open, onClose, destination, username, onAllC
   }, [queue]);
   useEffect(() => { void listStoredUploads(uploadScope(window.location.origin, runtime.basePath, username)).then((saved) => { setHasPersisted(saved.length > 0); queue.restore(saved); }); }, [queue, runtime.basePath, username]);
   const allDone = items.some((item) => item.phase === 'completed') && items.every((item) => ['completed', 'cancelled'].includes(item.phase));
-  useEffect(() => { if (allDone) onAllComplete(); }, [allDone, onAllComplete]);
+  const wasAllDone = useRef(false);
+  useEffect(() => {
+    if (allDone && !wasAllDone.current) onAllComplete();
+    wasAllDone.current = allDone;
+  }, [allDone, onAllComplete]);
   const openFilePicker = (id?: string) => {
     setAttachmentID(id ?? null);
     setAttachmentError(null);

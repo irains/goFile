@@ -73,6 +73,47 @@ test('operation dialog labels stay inside the content area', async ({ page }) =>
   expect(labelBox!.y).toBeLessThan(inputBox!.y);
 });
 
+test('refresh folder is visible, responsive, and updates the listing', async ({ page }) => {
+  let listingRequests = 0;
+  let releaseRefresh: (() => void) | undefined;
+  await page.route('**/api/session', (route) => route.fulfill({ json: session }));
+  await page.route(/\/api\/listing/, async (route) => {
+    listingRequests += 1;
+    if (listingRequests === 2) await new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const refreshed = listingRequests > 1;
+    return route.fulfill({
+      json: {
+        ok: true,
+        directory: {
+          path: '', parent_path: null, listing_token: `listing-token-${listingRequests}`, truncated: false,
+          entries: [{
+            name: refreshed ? 'refreshed.txt' : 'sample.txt', path: refreshed ? 'refreshed.txt' : 'sample.txt', kind: 'file', size_bytes: 12,
+            modified_at: '2026-09-05T10:54:28Z', mode: '-rw-r--r--', is_archive: false, previewable: true, editable: true, version: `v${listingRequests}`
+          }]
+        }
+      }
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+
+  const refresh = page.getByRole('button', { name: 'Refresh folder' });
+  await expect(refresh).toBeVisible();
+  await expect(page.locator('header').getByRole('button', { name: 'Refresh folder' })).toHaveCount(0);
+  await refresh.click();
+  await expect(page.getByRole('button', { name: 'Refreshing…' })).toBeDisabled();
+  await expect(page.getByText('sample.txt')).toBeVisible();
+  await expect(page.locator('.MuiTableContainer-root')).toHaveAttribute('aria-busy', 'true');
+
+  releaseRefresh?.();
+  await expect(page.getByText('refreshed.txt')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh folder' })).toBeEnabled();
+  expect(listingRequests).toBe(2);
+
+  const metrics = await page.locator('body').evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
+  expect(metrics.scrollWidth).toBe(metrics.clientWidth);
+});
+
 test('move destination browsing stays in one responsive dialog', async ({ page }) => {
   await mockWorkspaceApi(page);
   await page.setViewportSize({ width: 390, height: 844 });

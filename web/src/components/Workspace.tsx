@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Add,
   Archive,
@@ -181,10 +181,14 @@ export function Workspace() {
   const currentPath = directoryPathForEditor(editorPath, { pathname: routePathname });
   const [showUploads, setShowUploads] = useState(false);
   const [notice, setNotice] = useState<{ message: string; severity: AlertColor } | null>(null);
+  const [manualRefresh, setManualRefresh] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ type: 'single'; entry: FileEntry } | { type: 'batch'; entries: FileEntry[] } | null>(null);
   const compact = useMediaQuery(theme.breakpoints.down('md'));
   const listingQuery = useQuery({ queryKey: ['listing', currentPath], queryFn: () => api.getListing(currentPath) });
   const listing = listingQuery.data;
+  const isRefreshing = listingQuery.isFetching && !listingQuery.isLoading;
+  const refreshInProgress = manualRefresh || isRefreshing;
   const entries = listing?.entries ?? [];
   const routeEditor = editorPath ? {
     name: editorPath.split('/').pop() ?? editorPath,
@@ -205,9 +209,23 @@ export function Workspace() {
   const mutable = Boolean(session?.capabilities.mutate);
   const canUpload = Boolean(session?.capabilities.upload);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setSelected(new Set());
     await queryClient.invalidateQueries({ queryKey: ['listing', currentPath] });
+  }, [currentPath, queryClient]);
+  const handleManualRefresh = async () => {
+    if (refreshInProgress) return;
+    setManualRefresh(true);
+    setRefreshError(null);
+    setSelected(new Set());
+    try {
+      await queryClient.invalidateQueries({ queryKey: ['listing', currentPath] }, { throwOnError: true, cancelRefetch: false });
+      setNotice({ message: t('workspace.refreshed'), severity: 'success' });
+    } catch (error) {
+      setRefreshError(error instanceof ApiError ? t(`error.${error.code}`) : t('workspace.refreshFailed'));
+    } finally {
+      setManualRefresh(false);
+    }
   };
   const mutation = useMutation({
     mutationFn: ({ endpoint, values }: { endpoint: string; values: Record<string, string> }) => api.mutate<{ ok: true; hash?: string }>(endpoint, values),
@@ -287,7 +305,7 @@ export function Workspace() {
     </Stack>
   );
 
-  if (listingQuery.isError || !listing) return (
+  if (!listing) return (
     <Stack component="main" alignItems="center" justifyContent="center" sx={{ minHeight: '100dvh', p: 4 }}>
       <Paper sx={{ ...surface, p: { xs: 3, sm: 4 }, maxWidth: 480 }}>
         <Stack spacing={2}>
@@ -306,7 +324,6 @@ export function Workspace() {
       <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
         <Box sx={{ lineHeight: 0 }}><Mark size={22} /></Box>
         <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
-        <Tooltip title={t('workspace.refresh')}><IconButton aria-label={t('workspace.refresh')} onClick={() => void refresh()}><Refresh /></IconButton></Tooltip>
         <AppearanceToggle />
         <Tooltip title={locale === 'en' ? '中文' : 'English'}>
           <IconButton aria-label={locale === 'en' ? t('language.switchToChinese') : t('language.switchToEnglish')} onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}><Translate /></IconButton>
@@ -330,12 +347,22 @@ export function Workspace() {
           </Box>
           {!mutable && canUpload && <Chip label={t('workspace.uploadsOnly')} color="info" variant="outlined" />}
           {!mutable && !canUpload && <Chip label={t('workspace.readOnly')} variant="outlined" />}
-          {mutable && <Stack direction="row" flexWrap="wrap" gap={1}>
-            <Button startIcon={<CreateNewFolder />} variant="outlined" onClick={() => setForm({ action: 'newdir' })}>{t('workspace.newFolder')}</Button>
-            <Button startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>
-          </Stack>}
-          {canUpload && <Button startIcon={<UploadFile />} variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button>}
+          <Stack direction="row" flexWrap="wrap" gap={1}>
+            <Button
+              startIcon={refreshInProgress ? <CircularProgress color="inherit" size={18} /> : <Refresh />}
+              variant="outlined"
+              disabled={refreshInProgress}
+              onClick={() => void handleManualRefresh()}
+            >
+              {refreshInProgress ? t('workspace.refreshing') : t('workspace.refreshFolder')}
+            </Button>
+            {mutable && <Button startIcon={<CreateNewFolder />} variant="outlined" onClick={() => setForm({ action: 'newdir' })}>{t('workspace.newFolder')}</Button>}
+            {mutable && <Button startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>}
+            {canUpload && <Button startIcon={<UploadFile />} variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button>}
+          </Stack>
         </Box>
+        {refreshError && <Alert severity="warning" action={<Button color="inherit" size="small" disabled={refreshInProgress} onClick={() => void handleManualRefresh()}>{t('action.retry')}</Button>}>{refreshError}</Alert>}
+        {manualRefresh && <Typography role="status" aria-live="polite" sx={{ position: 'absolute', width: 1, height: 1, p: 0, m: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}>{t('workspace.refreshing')}</Typography>}
         {listing.truncated && <Alert severity="warning">{t('workspace.truncated')}</Alert>}
         {listing.parentPath !== null && (
           <Paper sx={{ ...surface, px: 1, py: 0.5 }}>
@@ -350,7 +377,7 @@ export function Workspace() {
           <Button size="small" startIcon={<Archive />} onClick={() => doBatch('do/batch/download-zip')}>{t('action.batchDownload')}</Button>
           <Button size="small" onClick={() => setSelected(new Set())}>{t('action.cancel')}</Button>
         </Paper>}
-        <TableContainer component={Paper} sx={surface}>
+        <TableContainer component={Paper} aria-busy={refreshInProgress || undefined} sx={surface}>
           <Table stickyHeader size={compact ? 'small' : 'medium'} aria-label={t('app.workspace')}>
             <TableHead><TableRow>
               <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectAll')} checked={entries.length > 0 && selected.size === entries.length} indeterminate={selected.size > 0 && selected.size < entries.length} onChange={(event) => setSelected(event.target.checked ? new Set(entries.map((entry) => entry.path)) : new Set())} /></TableCell>
@@ -417,7 +444,7 @@ export function Workspace() {
     <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => mutation.mutate({ endpoint, values })} onBatchSubmit={doBatch} />
     <PropertiesDialog entry={propertiesFor} properties={propertyQuery.data?.properties} isLoading={propertyQuery.isLoading} onClose={() => setPropertiesFor(null)} />
     {activeEditor && isEditorOpen && <Suspense fallback={<Stack role="status" aria-live="polite" alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}><LazyEditorDialog entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={() => { setEditorFor(null); setEditorOpen(false); if (editorPath) { const destination = itemUrl('d', editorReturnPath); window.history.replaceState(null, '', destination); setRoutePathname(destination); } }} /></Suspense>}
-    {canUpload && <UploadQueueDrawer open={showUploads} onClose={() => setShowUploads(false)} destination={listing.path} username={session?.username ?? ''} onAllComplete={() => void refresh()} />}
+    {canUpload && <UploadQueueDrawer open={showUploads} onClose={() => setShowUploads(false)} destination={listing.path} username={session?.username ?? ''} onAllComplete={refresh} />}
     <DialogShell
       open={Boolean(pendingDelete)}
       onClose={() => setPendingDelete(null)}

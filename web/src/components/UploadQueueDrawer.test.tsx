@@ -44,11 +44,15 @@ describe('UploadQueueDrawer', () => {
     expect(onAllComplete).not.toHaveBeenCalled();
   });
 
-  it('announces a terminal queue only when it contains a completed upload', async () => {
+  it('announces a terminal queue only once across callback rerenders', async () => {
     snapshot.mockReturnValue([completed, cancelled]);
     const onAllComplete = vi.fn();
-    await act(async () => { renderDrawer(onAllComplete); });
+    const view = renderDrawer(onAllComplete);
     await waitFor(() => expect(screen.getByText('All uploads are complete.')).toBeInTheDocument());
+    expect(onAllComplete).toHaveBeenCalledOnce();
+
+    view.rerender(<I18nProvider><UploadQueueDrawer open onClose={() => {}} destination="" username="operator" onAllComplete={() => onAllComplete()} /></I18nProvider>);
+    await act(async () => {});
     expect(onAllComplete).toHaveBeenCalledOnce();
   });
 });
