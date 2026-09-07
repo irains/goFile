@@ -44,7 +44,7 @@ export function DialogShell({
     <Dialog open={open} onClose={onClose} fullWidth maxWidth={maxWidth} fullScreen={fullScreen} PaperProps={{ sx: fullScreen ? { display: 'flex', flexDirection: 'column' } : undefined }}>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent sx={contentSx}>
-        <Stack spacing={2} sx={{ pt: 1, ...stackSx }}>
+        <Stack spacing={2} sx={{ pt: 2.5, ...stackSx }}>
           {children}
         </Stack>
       </DialogContent>

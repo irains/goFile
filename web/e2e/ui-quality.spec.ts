@@ -46,6 +46,33 @@ test('login labels stay within the outlined controls after focus', async ({ page
   expect(labelBox!.y).toBeLessThan(inputBox!.y + inputBox!.height);
 });
 
+test('operation dialog labels stay inside the content area', async ({ page }) => {
+  await mockWorkspaceApi(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: '切换语言为中文' }).click();
+  await page.getByRole('button', { name: '新建文件夹' }).click();
+
+  const dialog = page.getByRole('dialog');
+  const input = dialog.getByRole('textbox', { name: '文件夹名称' });
+  const label = dialog.locator(`label[for="${await input.getAttribute('id')}"]`);
+  const content = dialog.locator('.MuiDialogContent-root');
+
+  await input.focus();
+  await expect(input).toBeFocused();
+  await expect(label).toHaveClass(/MuiInputLabel-shrink/);
+
+  const [inputBox, labelBox, contentBox] = await Promise.all([
+    input.boundingBox(),
+    label.boundingBox(),
+    content.boundingBox()
+  ]);
+  expect(inputBox).not.toBeNull();
+  expect(labelBox).not.toBeNull();
+  expect(contentBox).not.toBeNull();
+  expect(labelBox!.y).toBeGreaterThanOrEqual(contentBox!.y);
+  expect(labelBox!.y).toBeLessThan(inputBox!.y);
+});
+
 test('move destination browsing stays in one responsive dialog', async ({ page }) => {
   await mockWorkspaceApi(page);
   await page.setViewportSize({ width: 390, height: 844 });
