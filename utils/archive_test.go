@@ -4,10 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
-	"github.com/irains/fileharbor/conf"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/irains/fileharbor/conf"
 )
 
 func TestSelectionZipIncludesTopLevelNames(t *testing.T) {

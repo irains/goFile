@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { I18nProvider } from '../i18n';
 import type { FileEntry } from '../api/client';
-import { EntryMenu, desktopTableColumnSx, directoryPathForEditor, editorPathFromLocation, entryKindLabel, fileNameButtonSx } from './Workspace';
+import { EntryMenu, decodeRouteSplat, desktopTableColumnSx, directoryPathForEditor, entryKindLabel, fileNameButtonSx } from './Workspace';
 import { entryMenuActions } from './entryActions';
 
 const file: FileEntry = {
@@ -23,19 +23,15 @@ beforeEach(() => {
   document.head.innerHTML = '<meta name="fileharbor-base" content="/fileharbor">';
 });
 
-describe('editor route parsing', () => {
-  it('opens a root-relative editor path below the configured base path', () => {
-    expect(editorPathFromLocation({ pathname: '/fileharbor/edit/docs/June%20report.txt' })).toBe('docs/June report.txt');
-  });
-
-  it('does not treat a directory route or malformed escape as an editor path', () => {
-    expect(editorPathFromLocation({ pathname: '/fileharbor/d/docs/report.txt' })).toBeNull();
-    expect(editorPathFromLocation({ pathname: '/fileharbor/edit/%E0%A4%A' })).toBeNull();
+describe('editor route paths', () => {
+  it('uses the already-decoded data-router splat without double decoding', () => {
+    expect(decodeRouteSplat('docs/June report.txt')).toBe('docs/June report.txt');
+    expect(decodeRouteSplat('literal%2Fname/report.txt')).toBe('literal%2Fname/report.txt');
   });
 
   it('returns the edited file directory when closing a deep link', () => {
-    expect(directoryPathForEditor('docs/June report.txt', { pathname: '/fileharbor/edit/docs/June%20report.txt' })).toBe('docs');
-    expect(directoryPathForEditor('notes.txt', { pathname: '/fileharbor/edit/notes.txt' })).toBe('');
+    expect(directoryPathForEditor('docs/June report.txt')).toBe('docs');
+    expect(directoryPathForEditor('notes.txt')).toBe('');
   });
 });
 

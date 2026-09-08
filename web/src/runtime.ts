@@ -42,8 +42,25 @@ export function routeUrl(path: string, query?: Record<string, string | undefined
   return `${url.pathname}${url.search}`;
 }
 
+export function encodePathSegments(rootRelativePath: string): string {
+  return rootRelativePath.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+}
+
+export function directoryRoute(rootRelativePath = ''): string {
+  const encodedPath = encodePathSegments(rootRelativePath);
+  return encodedPath ? `/d/${encodedPath}` : '/';
+}
+
+export function editorRoute(rootRelativePath: string): string {
+  const encodedPath = encodePathSegments(rootRelativePath);
+  return encodedPath ? `/edit/${encodedPath}` : '/edit';
+}
+
 export function itemUrl(prefix: string, rootRelativePath: string): string {
-  if (prefix === 'd' && !rootRelativePath) return baseUrl();
-  const encodedPath = rootRelativePath.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-  return baseUrl(`${prefix}/${encodedPath}`);
+  const route = prefix === 'd'
+    ? directoryRoute(rootRelativePath)
+    : prefix === 'edit'
+      ? editorRoute(rootRelativePath)
+      : `/${prefix}/${encodePathSegments(rootRelativePath)}`;
+  return baseUrl(route);
 }

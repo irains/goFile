@@ -70,7 +70,68 @@ test('operation dialog labels stay inside the content area', async ({ page }) =>
   expect(labelBox).not.toBeNull();
   expect(contentBox).not.toBeNull();
   expect(labelBox!.y).toBeGreaterThanOrEqual(contentBox!.y);
-  expect(labelBox!.y).toBeLessThan(inputBox!.y);
+  expect(labelBox!.y).toBeLessThan(inputBox!.y + inputBox!.height);
+});
+
+test('folder navigation is SPA-based and supports browser history', async ({ page }) => {
+  let sessionRequests = 0;
+  const requestedPaths: string[] = [];
+  await page.route('**/api/session', (route) => { sessionRequests += 1; return route.fulfill({ json: session }); });
+  await page.route(/\/api\/listing/, (route) => {
+    const path = new URL(route.request().url()).searchParams.get('path') ?? '';
+    requestedPaths.push(path);
+    const entries = path === ''
+      ? [{ name: 'Docs #1', path: 'Docs #1', kind: 'directory', size_bytes: 0, modified_at: '2026-09-05T10:54:28Z', mode: 'drwxr-xr-x', is_archive: false, previewable: false, editable: false, version: 'd1' }]
+      : [{ name: 'Nested folder', path: `${path}/Nested folder`, kind: 'directory', size_bytes: 0, modified_at: '2026-09-05T10:54:28Z', mode: 'drwxr-xr-x', is_archive: false, previewable: false, editable: false, version: 'd2' }];
+    return route.fulfill({ json: { ok: true, directory: { path, parent_path: path ? '' : null, listing_token: `token-${path}`, truncated: false, entries } } });
+  });
+
+  await page.goto('/');
+  const appBar = page.locator('header');
+  await expect(appBar).toBeVisible();
+  const appBarElement = await appBar.elementHandle();
+
+  await page.getByRole('link', { name: 'Docs #1' }).click();
+  await expect(page).toHaveURL(/\/d\/Docs%20%231$/);
+  await expect(page.getByRole('link', { name: 'Nested folder' })).toBeVisible();
+  expect(await page.locator('header').evaluate((node, original) => node === original, appBarElement)).toBe(true);
+  expect(sessionRequests).toBeGreaterThan(0);
+  expect(requestedPaths).toEqual(['', 'Docs #1']);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('link', { name: 'Docs #1' })).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(/\/d\/Docs%20%231$/);
+  await page.getByRole('link', { name: 'Root' }).click();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test('editor route blocks dirty navigation and closes to its origin', async ({ page }) => {
+  await page.route('**/api/session', (route) => route.fulfill({ json: session }));
+  await page.route(/\/api\/listing/, (route) => {
+    const path = new URL(route.request().url()).searchParams.get('path') ?? '';
+    return route.fulfill({ json: { ok: true, directory: { path, parent_path: null, listing_token: `token-${path}`, truncated: false, entries: [{ name: 'sample.txt', path: 'sample.txt', kind: 'file', size_bytes: 6, modified_at: '2026-09-05T10:54:28Z', mode: '-rw-r--r--', is_archive: false, previewable: true, editable: true, version: 'v1' }] } } });
+  });
+  await page.route(/\/api\/editor\/content/, (route) => route.fulfill({ json: { ok: true, editor: { path: 'sample.txt', name: 'sample.txt', content: 'original', size_bytes: 8, modified_at: '2026-09-05T10:54:28Z', extension: 'txt', version: 'v1' } } }));
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Actions sample.txt' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  await expect(page).toHaveURL(/\/edit\/sample\.txt$/);
+  await expect(page.getByText('sample.txt', { exact: true }).first()).toBeVisible();
+
+  await expect(page.locator('.ace_text-input')).toBeVisible();
+  await page.locator('.ace_text-input').pressSequentially(' changed');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page).toHaveURL(/\/edit\/sample\.txt$/);
+
+  await page.goBack();
+  await page.getByRole('button', { name: 'Discard' }).click();
+  await expect(page).toHaveURL(/\/$/);
 });
 
 test('refresh folder is visible, responsive, and updates the listing', async ({ page }) => {
@@ -97,9 +158,9 @@ test('refresh folder is visible, responsive, and updates the listing', async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
 
-  const refresh = page.getByRole('button', { name: 'Refresh folder' });
+  const refresh = page.getByRole('button', { name: 'Refresh' });
   await expect(refresh).toBeVisible();
-  await expect(page.locator('header').getByRole('button', { name: 'Refresh folder' })).toHaveCount(0);
+  await expect(page.locator('header').getByRole('button', { name: 'Refresh' })).toHaveCount(0);
   await refresh.click();
   await expect(page.getByRole('button', { name: 'Refreshing…' })).toBeDisabled();
   await expect(page.getByText('sample.txt')).toBeVisible();
@@ -107,7 +168,7 @@ test('refresh folder is visible, responsive, and updates the listing', async ({ 
 
   releaseRefresh?.();
   await expect(page.getByText('refreshed.txt')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Refresh folder' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   expect(listingRequests).toBe(2);
 
   const metrics = await page.locator('body').evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));

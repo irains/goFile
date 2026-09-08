@@ -3,6 +3,7 @@ import 'ace-builds/css/theme/github_dark.css';
 import 'ace-builds/css/theme/github_light_default.css';
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
+import { useBlocker } from 'react-router-dom';
 import { useColorScheme } from '@mui/material/styles';
 import { Alert, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
 import type { FileEntry } from '../api/client';
@@ -37,7 +38,7 @@ function modeFor(name: string) {
   return ({ js: 'javascript', ts: 'typescript', tsx: 'tsx', jsx: 'jsx', json: 'json', md: 'markdown', yml: 'yaml', yaml: 'yaml', sh: 'sh', bash: 'sh', go: 'golang', py: 'python', html: 'html', css: 'css', xml: 'xml', sql: 'sql', toml: 'toml', ini: 'ini' } as Record<string, string>)[extension] ?? 'text';
 }
 
-export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; writable: boolean; onClose: () => void }) {
+export function EditorDialog({ entry, writable, onClose, onSaved }: { entry: FileEntry; writable: boolean; onClose: () => void; onSaved?: () => void | Promise<void> }) {
   const { mode } = useColorScheme();
   const { t } = useI18n();
   const aceTheme = aceThemeForMode(resolveColorScheme((mode ?? 'system') as ThemeMode));
@@ -52,6 +53,8 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
   const dirty = value !== original;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const allowNavigationRef = useRef(false);
+  const blocker = useBlocker(() => dirtyRef.current && !allowNavigationRef.current);
 
   const load = async (replaceDraft = true) => {
     setError(null);
@@ -109,6 +112,7 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
       setOriginal(value);
       setVersion(response.editor.version);
       setConflicted(false);
+      await onSaved?.();
       return true;
     } catch (saveError) {
       if (saveError instanceof ApiError && saveError.code === 'source_changed') setConflicted(true);
@@ -130,12 +134,28 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, saving, writable, version, value]);
   const close = () => { if (dirty) setDiscarding(true); else onClose(); };
-  const saveAndClose = async () => {
-    if (await save()) {
-      setDiscarding(false);
+  const leaveAfterDiscard = () => {
+    setDiscarding(false);
+    if (blocker.state === 'blocked') blocker.proceed();
+    else {
+      allowNavigationRef.current = true;
       onClose();
     }
   };
+  const saveAndClose = async () => {
+    const pendingBlocker = blocker.state === 'blocked' ? blocker : null;
+    if (await save()) {
+      setDiscarding(false);
+      if (pendingBlocker) pendingBlocker.proceed();
+      else {
+        allowNavigationRef.current = true;
+        onClose();
+      }
+    }
+  };
+  useEffect(() => {
+    if (blocker.state === 'blocked') setDiscarding(true);
+  }, [blocker.state]);
   const language = modeFor(entry.name);
   return (
     <Dialog open onClose={close} fullScreen>
@@ -156,11 +176,11 @@ export function EditorDialog({ entry, writable, onClose }: { entry: FileEntry; w
         <Button onClick={close}>{t('action.close')}</Button>
         {writable && <Button variant="contained" disabled={saving || !dirty || !version} onClick={() => void save()}>{t('editor.save')}</Button>}
       </DialogActions>
-      <DialogShell open={discarding} onClose={() => setDiscarding(false)} title={t('dialog.confirmDiscard')} hideActions>
+      <DialogShell open={discarding} onClose={() => { setDiscarding(false); if (blocker.state === 'blocked') blocker.reset(); }} title={t('dialog.confirmDiscard')} hideActions>
         <Typography color="text.secondary">{t('editor.discardWarning')}</Typography>
         <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ pt: 1 }}>
-          <Button onClick={() => setDiscarding(false)}>{t('action.cancel')}</Button>
-          <Button color="error" onClick={() => { setDiscarding(false); onClose(); }}>{t('dialog.discard')}</Button>
+          <Button onClick={() => { setDiscarding(false); if (blocker.state === 'blocked') blocker.reset(); }}>{t('action.cancel')}</Button>
+          <Button color="error" onClick={leaveAfterDiscard}>{t('dialog.discard')}</Button>
           {writable && <Button variant="contained" disabled={saving} onClick={() => void saveAndClose()}>{t('editor.save')}</Button>}
         </Stack>
       </DialogShell>

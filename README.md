@@ -84,6 +84,33 @@ fileharbor -path /srv/fileharbor/data -state-dir /var/lib/fileharbor
 
 使用 HTTP 探针：`/healthz` 表示进程可服务，`/readyz` 仅在私有状态和审计日志可用时返回 200。容器和负载均衡器应使用 `/readyz`。单次 multipart 上传限制为 256 MiB，旧分片上传的每个分片限制为 64 MiB；超过限制会返回 `413`。收到终止信号后，FileHarbor 停止接收新请求并在平台关停时限内等待已接收的请求；若超时，进程会退出并保留状态目录锁，由操作系统在进程退出时释放，避免仍在执行的请求与状态清理发生竞争。
 
+## 归档解压
+
+浏览器中的“解压”操作使用 `POST /do/extract`；`POST /do/unzip` 保留为兼容路由。两者均要求已登录会话、CSRF Token、可写模式和可用的审计日志，并返回稳定的 JSON 错误码。
+
+| 类型 | 可识别扩展名 | 说明 |
+| --- | --- | --- |
+| ZIP | `.zip` | 解压 |
+| TAR | `.tar` | 解压 |
+| gzip TAR | `.tar.gz`、`.tar.gzip`、`.tgz` | 解压 |
+| bzip2 TAR | `.tar.bz2`、`.tar.bzip2`、`.tbz`、`.tbz2` | 解压 |
+| XZ TAR | `.tar.xz`、`.txz` | 解压 |
+| Zstandard TAR | `.tar.zst`、`.tar.zstd`、`.tzst` | 解压 |
+| LZ4 TAR | `.tar.lz4` | 解压 |
+| Brotli TAR | `.tar.br` | 解压 |
+| Snappy/S2 TAR | `.tar.sz`、`.tar.snappy` | 解压 framed Snappy/S2 流 |
+| zlib TAR | `.tar.zz`、`.tar.zlib` | 解压 |
+| 单文件压缩流 | `.gz`/`.gzip`、`.bz2`/`.bzip2`、`.xz`、`.zst`/`.zstd`、`.lz4`、`.br`、`.sz`/`.snappy`、`.zz`/`.zlib` | 去掉最后一个匹配扩展名生成单个文件 |
+| RAR | `.rar` | 只读解压；仅单卷且不支持密码 |
+
+扩展名匹配不区分大小写，并采用最长后缀规则。7z 未启用：当前纯 Go reader 无法提供本功能所要求的可靠单-reader 内存上限。实现保持纯 Go、无需 CGO；XZ 使用 64 MiB 字典上限，Zstandard 使用 64 MiB window/decoder memory 上限，RAR 使用 64 MiB 字典上限。
+
+每次解压最多接受 10,000 个条目、2 GiB 压缩输入和 2 GiB 实际输出。服务会先校验文件扩展名与可用 magic/header，始终从同一个已打开的文件描述符处理源文件，并在发布前复核文件身份、版本和 SHA-256；请求取消或源文件发生变化时不会发布结果。空包、损坏包、加密包、多卷 RAR 及超限输入会被拒绝。
+
+输出先写入目标目录所在文件系统中的隐藏 staging 目录，再使用“不替换”重命名发布。已存在的同名目标不会被覆盖或删除。归档内每个路径都按跨平台规则检查并确认被 staging 目录包含；符号链接、硬链接、设备及其它特殊文件、重复路径、大小写折叠冲突和文件/目录冲突均被拒绝。文件以排他创建方式写入，setuid、setgid 和 sticky 位会被去除，目录权限在文件完成后再应用。对于包含多个顶层项目的包，发布期间若出现竞争，服务会回滚本次已发布项目；若操作系统阻止完整回滚，则明确返回 `execution_partial`，且绝不会删除未知的既有数据。`.fileharbor-upload-`、`.fileharbor-zip-` 和 `.fileharbor-extract-` 前缀均为内部保留名称，不会出现在目录列表中，也不能通过普通路径操作访问。
+
+归档相关稳定错误码为：`unsupported_archive`、`corrupt_archive`、`encrypted_archive`、`archive_unsafe_entry`（HTTP 400），`archive_limit_exceeded`（HTTP 413），以及 `destination_exists`、`source_changed`（HTTP 409）。响应不会包含 decoder 原始错误或服务器内部路径。
+
 ## 可靠可恢复上传 API
 
 内置网页使用 v1 `api/uploads` 协议：可同时排队多个文件，基于真实分片传输显示进度，并提供暂停、恢复、重试与取消。网页会将 upload ID、capability、目标、文件元数据和完整 SHA-256 保存到当前浏览器的 IndexedDB，**从不保存文件内容、`File`、`Blob`、base64 或分片字节**。页面刷新、浏览器重启或重新登录后，浏览器必须重新选择原文件，并完整计算 SHA-256 后才能继续上传；选择的文件不匹配时，不会向已有传输写入任何内容。

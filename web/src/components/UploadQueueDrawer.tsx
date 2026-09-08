@@ -13,25 +13,36 @@ function labelFor(phase: QueueItem['phase'], t: (key: string) => string) {
   return phase === 'reselect' ? t('upload.resumeHint') : t(`upload.${phase === 'failed' ? 'failed' : phase}`);
 }
 
-export function UploadQueueDrawer({ open, onClose, destination, username, onAllComplete }: { open: boolean; onClose: () => void; destination: string; username: string; onAllComplete: () => void }) {
+export function UploadQueueDrawer({ open, onClose, destination, username, onAllComplete }: { open: boolean; onClose: () => void; destination: string; username: string; onAllComplete: (destinationPaths: string[]) => void }) {
   const { t } = useI18n();
   const runtime = getRuntime();
   const fileInput = useRef<HTMLInputElement>(null);
+  const destinationRef = useRef(destination);
+  destinationRef.current = destination;
   const [items, setItems] = useState<QueueItem[]>([]);
   const [attachmentID, setAttachmentID] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [hasPersisted, setHasPersisted] = useState<boolean>(false);
-  const queue = useMemo(() => new ReliableUploadQueue(uploadScope(window.location.origin, runtime.basePath, username), () => destination), [runtime.basePath, username, destination]);
+  const queue = useMemo(() => new ReliableUploadQueue(uploadScope(window.location.origin, runtime.basePath, username), () => destinationRef.current), [runtime.basePath, username]);
   useEffect(() => {
     const unsubscribe = queue.subscribe(() => setItems(queue.snapshot()));
     return unsubscribe;
   }, [queue]);
   useEffect(() => { void listStoredUploads(uploadScope(window.location.origin, runtime.basePath, username)).then((saved) => { setHasPersisted(saved.length > 0); queue.restore(saved); }); }, [queue, runtime.basePath, username]);
-  const allDone = items.some((item) => item.phase === 'completed') && items.every((item) => ['completed', 'cancelled'].includes(item.phase));
+  const completedDestinations = useRef(new Set<string>());
   const wasAllDone = useRef(false);
+  const hasNonTerminal = items.some((item) => !['completed', 'cancelled'].includes(item.phase));
+  if (wasAllDone.current && hasNonTerminal) {
+    completedDestinations.current.clear();
+    wasAllDone.current = false;
+  }
+  for (const item of items) if (item.phase === 'completed') completedDestinations.current.add(item.path);
+  const allDone = items.length > 0 && completedDestinations.current.size > 0 && !hasNonTerminal;
   useEffect(() => {
-    if (allDone && !wasAllDone.current) onAllComplete();
-    wasAllDone.current = allDone;
+    if (allDone && !wasAllDone.current) {
+      onAllComplete([...completedDestinations.current]);
+      wasAllDone.current = true;
+    }
   }, [allDone, onAllComplete]);
   const openFilePicker = (id?: string) => {
     setAttachmentID(id ?? null);

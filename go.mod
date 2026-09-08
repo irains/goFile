@@ -3,7 +3,12 @@ module github.com/irains/fileharbor
 go 1.27.0
 
 require (
+	github.com/andybalholm/brotli v1.2.3
 	github.com/gin-gonic/gin v1.12.0
+	github.com/klauspost/compress v1.20.0
+	github.com/mikelolasagasti/xz v1.0.1
+	github.com/nwaples/rardecode/v2 v2.4.1
+	github.com/pierrec/lz4/v4 v4.1.29
 	golang.org/x/crypto v0.52.0
 	golang.org/x/sys v0.45.0
 	golang.org/x/term v0.43.0

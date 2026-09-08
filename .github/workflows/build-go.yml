@@ -67,6 +67,12 @@ jobs:
       - name: Type check
         working-directory: web
         run: npm run typecheck
+      - name: Install Chromium for browser tests
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Browser test
+        working-directory: web
+        run: npm run test:e2e
       - name: Remove generated frontend output
         shell: bash
         run: rm -rf assets/web

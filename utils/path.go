@@ -3,7 +3,6 @@ package utils
 import (
 	"errors"
 	"fmt"
-	"github.com/irains/fileharbor/conf"
 	"io/fs"
 	"os"
 	"path"
@@ -11,25 +10,40 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/irains/fileharbor/conf"
 )
 
 const (
-	MaxListEntries            = 100
-	InternalUploadStagePrefix = ".fileharbor-upload-"
+	MaxListEntries               = 100
+	InternalUploadStagePrefix    = ".fileharbor-upload-"
+	InternalArchiveZipPrefix     = ".fileharbor-zip-"
+	InternalArchiveExtractPrefix = ".fileharbor-extract-"
 )
 
+var internalReservedPrefixes = []string{
+	InternalUploadStagePrefix,
+	InternalArchiveZipPrefix,
+	InternalArchiveExtractPrefix,
+}
+
 var (
-	ErrInvalidPath        = &OperationError{Code: "invalid_path"}
-	ErrNotFound           = &OperationError{Code: "not_found"}
-	ErrNotDirectory       = &OperationError{Code: "not_directory"}
-	ErrRootOperation      = &OperationError{Code: "root_operation_forbidden"}
-	ErrDestinationExists  = &OperationError{Code: "destination_exists"}
-	ErrSelfDescendant     = &OperationError{Code: "self_descendant"}
-	ErrInvalidName        = &OperationError{Code: "invalid_name"}
-	ErrUnsupportedType    = &OperationError{Code: "unsupported_file_type"}
-	ErrInvalidTextContent = &OperationError{Code: "invalid_text_content"}
-	ErrSourceChanged      = &OperationError{Code: "source_changed"}
-	ErrBatchLimitExceeded = &OperationError{Code: "batch_limit_exceeded"}
+	ErrInvalidPath          = &OperationError{Code: "invalid_path"}
+	ErrNotFound             = &OperationError{Code: "not_found"}
+	ErrNotDirectory         = &OperationError{Code: "not_directory"}
+	ErrRootOperation        = &OperationError{Code: "root_operation_forbidden"}
+	ErrDestinationExists    = &OperationError{Code: "destination_exists"}
+	ErrSelfDescendant       = &OperationError{Code: "self_descendant"}
+	ErrInvalidName          = &OperationError{Code: "invalid_name"}
+	ErrUnsupportedType      = &OperationError{Code: "unsupported_file_type"}
+	ErrInvalidTextContent   = &OperationError{Code: "invalid_text_content"}
+	ErrSourceChanged        = &OperationError{Code: "source_changed"}
+	ErrBatchLimitExceeded   = &OperationError{Code: "batch_limit_exceeded"}
+	ErrUnsupportedArchive   = &OperationError{Code: "unsupported_archive"}
+	ErrCorruptArchive       = &OperationError{Code: "corrupt_archive"}
+	ErrEncryptedArchive     = &OperationError{Code: "encrypted_archive"}
+	ErrArchiveUnsafeEntry   = &OperationError{Code: "archive_unsafe_entry"}
+	ErrArchiveLimitExceeded = &OperationError{Code: "archive_limit_exceeded"}
 )
 
 // OperationError intentionally carries a stable public code only. Handlers must
@@ -179,7 +193,7 @@ func ResolveDirectory(raw string, allowRoot bool) (string, string, os.FileInfo, 
 // ValidateLeafName applies the portable subset of filename rules, so a name
 // accepted on every FileHarbor-supported platform.
 func ValidateLeafName(name string) error {
-	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, InternalUploadStagePrefix) || !utf8.ValidString(name) || strings.ContainsAny(name, "/\\<>:\"|?*") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+	if name == "" || name == "." || name == ".." || isInternalReservedName(name) || !utf8.ValidString(name) || strings.ContainsAny(name, "/\\<>:\"|?*") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
 		return ErrInvalidName
 	}
 	for _, r := range name {
@@ -195,6 +209,16 @@ func ValidateLeafName(name string) error {
 		return ErrInvalidName
 	}
 	return nil
+}
+
+func isInternalReservedName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, prefix := range internalReservedPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // rejectSymlinkParents prevents operations from treating a child below a managed
@@ -296,7 +320,7 @@ func ListDirectory(raw string) (conf.Info, error) {
 			kind = "directory"
 		}
 		extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
-		archive := extension == "zip" || extension == "gz" || extension == "tgz"
+		archive := IsArchive(name)
 		item := conf.Entry{Name: name, Path: rel, Kind: kind, Size: stat.Size(), Modified: stat.ModTime(), Mode: stat.Mode().String(), Extension: extension, IsArchive: archive, Version: versionFor(stat)}
 		info.Entries = append(info.Entries, item)
 		if stat.IsDir() {

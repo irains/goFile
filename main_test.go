@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/irains/fileharbor/auth"
 	"github.com/irains/fileharbor/conf"
+	"github.com/irains/fileharbor/utils"
 )
 
 func testManager(t *testing.T) *auth.Manager {
@@ -312,6 +315,220 @@ func TestBatchDownloadRouteDoesNotConflictWithFileDownloads(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusFound {
 		t.Fatalf("unauthenticated file download = %d", response.Code)
+	}
+}
+
+func TestArchiveOperationStatuses(t *testing.T) {
+	for _, test := range []struct {
+		err  error
+		want int
+	}{
+		{utils.ErrUnsupportedArchive, http.StatusBadRequest},
+		{utils.ErrCorruptArchive, http.StatusBadRequest},
+		{utils.ErrEncryptedArchive, http.StatusBadRequest},
+		{utils.ErrArchiveUnsafeEntry, http.StatusBadRequest},
+		{utils.ErrArchiveLimitExceeded, http.StatusRequestEntityTooLarge},
+		{utils.ErrDestinationExists, http.StatusConflict},
+	} {
+		if got := operationStatus(test.err); got != test.want {
+			t.Errorf("operationStatus(%v) = %d, want %d", test.err, got, test.want)
+		}
+	}
+}
+
+func readAuditEvents(t *testing.T, state *RuntimeState) []AuditEvent {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join(state.Dir, stateAuditFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(contents), []byte{'\n'})
+	events := make([]AuditEvent, 0, len(lines))
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		var event AuditEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+func TestArchiveExtractionHandlerAndCompatibilityRoute(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
+	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
+	})
+	manager := testManager(t)
+	state := newTestState(t)
+	router := newRouter(manager, state)
+	cookie := loginCookie(t, router)
+	csrf := sessionCSRF(t, manager, cookie)
+
+	writeArchive := func(name, output string) {
+		file, err := os.Create(filepath.Join(conf.FileHarbor, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writer := zip.NewWriter(file)
+		entry, err := writer.Create(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte("payload")); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, test := range []struct {
+		route, archive, output string
+	}{{"/do/extract", "new.zip", "new.txt"}, {"/do/unzip", "legacy.zip", "legacy.txt"}} {
+		beforeAudit := len(readAuditEvents(t, state))
+		writeArchive(test.archive, test.output)
+		body := url.Values{"path": {test.archive}}.Encode()
+		request := httptest.NewRequest(http.MethodPost, test.route, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("X-CSRF-Token", csrf)
+		request.AddCookie(cookie)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s = %d: %s", test.route, response.Code, response.Body.String())
+		}
+		if data, err := os.ReadFile(filepath.Join(conf.FileHarbor, test.output)); err != nil || string(data) != "payload" {
+			t.Fatalf("%s output = %q, %v", test.route, data, err)
+		}
+		events := readAuditEvents(t, state)
+		if len(events) != beforeAudit+2 {
+			t.Fatalf("%s added %d audit records, want 2", test.route, len(events)-beforeAudit)
+		}
+		attempt, success := events[len(events)-2], events[len(events)-1]
+		if attempt.Event != "archive.extract" || attempt.Outcome != "attempted" || attempt.Path != test.archive {
+			t.Fatalf("%s attempt = %#v", test.route, attempt)
+		}
+		if success.Event != "archive.extract" || success.Outcome != "success" || success.Path != test.archive {
+			t.Fatalf("%s success = %#v", test.route, success)
+		}
+	}
+
+	body := url.Values{"path": {"new.zip"}}.Encode()
+	request := httptest.NewRequest(http.MethodPost, "/do/extract", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "csrf_invalid") {
+		t.Fatalf("missing CSRF = %d: %s", response.Code, response.Body.String())
+	}
+
+	beforeAudit := len(readAuditEvents(t, state))
+	body = url.Values{"path": {"../outside.zip"}}.Encode()
+	request = httptest.NewRequest(http.MethodPost, "/do/extract", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-CSRF-Token", csrf)
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_path") {
+		t.Fatalf("invalid path = %d: %s", response.Code, response.Body.String())
+	}
+	events := readAuditEvents(t, state)
+	if len(events) != beforeAudit+1 || events[len(events)-1].Outcome != "attempted" || events[len(events)-1].Path != "" {
+		t.Fatalf("invalid path audit = %#v", events[beforeAudit:])
+	}
+}
+
+func TestArchiveHandlerStableStatusesAndReadOnly(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
+	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
+	})
+	if err := os.WriteFile(filepath.Join(conf.FileHarbor, "bad.zip"), []byte("bad"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manager := testManager(t)
+	router := newTestRouter(t, manager)
+	cookie := loginCookie(t, router)
+	csrf := sessionCSRF(t, manager, cookie)
+	body := url.Values{"path": {"bad.zip"}}.Encode()
+	request := httptest.NewRequest(http.MethodPost, "/do/extract", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-CSRF-Token", csrf)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "corrupt_archive") {
+		t.Fatalf("corrupt status = %d: %s", response.Code, response.Body.String())
+	}
+
+	postExtract := func(path string) *httptest.ResponseRecorder {
+		body := url.Values{"path": {path}}.Encode()
+		request := httptest.NewRequest(http.MethodPost, "/do/extract", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("X-CSRF-Token", csrf)
+		request.AddCookie(cookie)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	if err := os.WriteFile(filepath.Join(conf.FileHarbor, "exists"), []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	conflictFile, err := os.Create(filepath.Join(conf.FileHarbor, "conflict.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflictZip := zip.NewWriter(conflictFile)
+	if _, err := conflictZip.Create("exists"); err != nil {
+		t.Fatal(err)
+	}
+	if err := conflictZip.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conflictFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	response = postExtract("conflict.zip")
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "destination_exists") {
+		t.Fatalf("conflict status = %d: %s", response.Code, response.Body.String())
+	}
+
+	limitFile, err := os.Create(filepath.Join(conf.FileHarbor, "limit.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := limitFile.Truncate((int64(2) << 30) + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := limitFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	response = postExtract("limit.zip")
+	if response.Code != http.StatusRequestEntityTooLarge || !strings.Contains(response.Body.String(), "archive_limit_exceeded") {
+		t.Fatalf("limit status = %d: %s", response.Code, response.Body.String())
+	}
+
+	reader = true
+	readOnlyRouter := newTestRouter(t, manager)
+	request = httptest.NewRequest(http.MethodPost, "/do/extract", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-CSRF-Token", csrf)
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	readOnlyRouter.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("read-only extraction = %d: %s", response.Code, response.Body.String())
 	}
 }
 

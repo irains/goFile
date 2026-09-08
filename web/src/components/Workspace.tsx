@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Add,
   Archive,
@@ -54,8 +54,9 @@ import {
 } from '@mui/material';
 import { useColorScheme, useTheme } from '@mui/material/styles';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useLocation, useMatches, useNavigate } from 'react-router-dom';
 import { api, ApiError, type FileEntry, type Properties } from '../api/client';
-import { itemUrl } from '../runtime';
+import { directoryRoute, editorRoute, itemUrl } from '../runtime';
 import { useI18n } from '../i18n';
 import { useSession } from '../session/SessionProvider';
 import { Mark } from './Mark';
@@ -74,7 +75,6 @@ type FormAction = 'newdir' | 'newfile' | 'rename' | 'move' | 'copy';
 type FormState = { action: FormAction; entry?: FileEntry } | null;
 
 const fmtDate = (value: string | number) => value ? new Date(value).toLocaleString() : '—';
-const navigateDirectory = (path: string) => { window.location.assign(itemUrl('d', path)); };
 export const entryKindLabel = (kind: FileEntry['kind'], t: (key: string) => string) => t(kind === 'directory' ? 'workspace.folder' : 'workspace.file');
 export const desktopTableColumnSx = {
   name: { width: '100%' },
@@ -91,34 +91,16 @@ export const fileNameButtonSx = {
   overflowWrap: 'anywhere'
 } as const;
 
-function directoryPathFromLocation(location: Pick<Location, 'pathname'> = window.location): string {
-  const base = itemUrl('d', '').replace(/\/$/, '');
-  const pathname = location.pathname.replace(/\/$/, '');
-  if (pathname === base || pathname === `${base}/d`) return '';
-  const prefix = `${base}/d/`;
-  if (!pathname.startsWith(prefix)) return '';
-  return pathname.slice(prefix.length).split('/').filter(Boolean).map(decodeURIComponent).join('/');
+export function decodeRouteSplat(splat: string | undefined): string {
+  return (splat ?? '').split('/').filter(Boolean).join('/');
 }
 
-export function editorPathFromLocation(location: Pick<Location, 'pathname'> = window.location): string | null {
-  const base = itemUrl('d', '').replace(/\/$/, '');
-  const pathname = location.pathname.replace(/\/$/, '');
-  const prefix = `${base}/edit/`;
-  if (!pathname.startsWith(prefix)) return null;
-  try {
-    const value = pathname.slice(prefix.length).split('/').filter(Boolean).map(decodeURIComponent).join('/');
-    return value || null;
-  } catch {
-    return null;
-  }
-}
-
-export function directoryPathForEditor(editorPath: string | null, location: Pick<Location, 'pathname'> = window.location): string {
+export function directoryPathForEditor(editorPath: string | null, directoryPath = ''): string {
   if (editorPath) {
     const segments = editorPath.split('/').filter(Boolean);
     return segments.slice(0, -1).join('/');
   }
-  return directoryPathFromLocation(location);
+  return directoryPath;
 }
 
 function AppearanceToggle() {
@@ -169,16 +151,21 @@ export function Workspace() {
   const { t, locale, setLocale } = useI18n();
   const { session, logout } = useSession();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const routePathname = location.pathname.replace(/\/$/, '') || '/';
+  const matches = useMatches();
+  const routeParams = matches.at(-1)?.params ?? {};
+  const editorPath = /^\/edit(?:\/|$)/.test(routePathname) ? decodeRouteSplat(routeParams['*']) || null : null;
+  const currentPath = directoryPathForEditor(editorPath, /^\/d(?:\/|$)/.test(routePathname) ? decodeRouteSplat(routeParams['*']) : '');
+  const previousPath = useRef(currentPath);
+  const currentPathRef = useRef(currentPath);
+  currentPathRef.current = currentPath;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [menuEntry, setMenuEntry] = useState<FileEntry | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [form, setForm] = useState<FormState>(null);
   const [propertiesFor, setPropertiesFor] = useState<FileEntry | null>(null);
-  const [editorFor, setEditorFor] = useState<FileEntry | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [routePathname, setRoutePathname] = useState(() => window.location.pathname);
-  const editorPath = editorPathFromLocation({ pathname: routePathname });
-  const currentPath = directoryPathForEditor(editorPath, { pathname: routePathname });
   const [showUploads, setShowUploads] = useState(false);
   const [notice, setNotice] = useState<{ message: string; severity: AlertColor } | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
@@ -203,66 +190,75 @@ export function Workspace() {
     editable: true,
     version: ''
   } : null;
-  const activeEditor = editorFor ?? routeEditor;
-  const isEditorOpen = editorOpen || Boolean(editorPath);
-  const editorReturnPath = editorPath ? directoryPathForEditor(editorPath) : currentPath;
+  const activeEditor = routeEditor;
+  const editorReturnPath = directoryPathForEditor(editorPath);
   const mutable = Boolean(session?.capabilities.mutate);
   const canUpload = Boolean(session?.capabilities.upload);
 
-  const refresh = useCallback(async () => {
-    setSelected(new Set());
-    await queryClient.invalidateQueries({ queryKey: ['listing', currentPath] });
-  }, [currentPath, queryClient]);
+  const refreshDirectory = useCallback(async (path: string) => {
+    await queryClient.invalidateQueries({ queryKey: ['listing', path] });
+  }, [queryClient]);
   const handleManualRefresh = async () => {
     if (refreshInProgress) return;
+    const refreshPath = currentPath;
     setManualRefresh(true);
     setRefreshError(null);
     setSelected(new Set());
     try {
-      await queryClient.invalidateQueries({ queryKey: ['listing', currentPath] }, { throwOnError: true, cancelRefetch: false });
-      setNotice({ message: t('workspace.refreshed'), severity: 'success' });
+      await queryClient.invalidateQueries({ queryKey: ['listing', refreshPath] }, { throwOnError: true, cancelRefetch: false });
+      if (currentPathRef.current === refreshPath) setNotice({ message: t('workspace.refreshed'), severity: 'success' });
     } catch (error) {
-      setRefreshError(error instanceof ApiError ? t(`error.${error.code}`) : t('workspace.refreshFailed'));
+      if (currentPathRef.current === refreshPath) setRefreshError(error instanceof ApiError ? t(`error.${error.code}`) : t('workspace.refreshFailed'));
     } finally {
-      setManualRefresh(false);
+      if (currentPathRef.current === refreshPath) setManualRefresh(false);
     }
   };
   const mutation = useMutation({
-    mutationFn: ({ endpoint, values }: { endpoint: string; values: Record<string, string> }) => api.mutate<{ ok: true; hash?: string }>(endpoint, values),
-    onSuccess: async (result) => {
+    mutationFn: ({ endpoint, values }: { endpoint: string; values: Record<string, string>; affectedDirectories: string[] }) => api.mutate<{ ok: true; hash?: string }>(endpoint, values),
+    onSuccess: async (result, variables) => {
       if (result.hash) setNotice({ message: t('success.checksum', { hash: result.hash }), severity: 'success' });
-      await refresh();
+      await Promise.all(variables.affectedDirectories.map(refreshDirectory));
     },
     onError: (error) => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' })
   });
   const batch = useMutation({
-    mutationFn: ({ endpoint, body }: { endpoint: string; body: unknown }) => api.batch<{ ok: boolean; download_url?: string }>(endpoint, body),
-    onSuccess: async (result) => { if (result.download_url) window.location.assign(result.download_url); else await refresh(); },
+    mutationFn: ({ endpoint, body }: { endpoint: string; body: unknown; affectedDirectories: string[] }) => api.batch<{ ok: boolean; download_url?: string }>(endpoint, body),
+    onSuccess: async (result, variables) => { if (result.download_url) window.location.assign(result.download_url); else await Promise.all(variables.affectedDirectories.map(refreshDirectory)); },
     onError: (error) => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' })
   });
   const propertyQuery = useQuery({ queryKey: ['properties', propertiesFor?.path], queryFn: () => api.getProperties(propertiesFor!.path), enabled: Boolean(propertiesFor) });
 
   useEffect(() => {
-    const updateRoute = () => setRoutePathname(window.location.pathname);
-    window.addEventListener('popstate', updateRoute);
-    return () => window.removeEventListener('popstate', updateRoute);
-  }, []);
+    if (previousPath.current === currentPath) return;
+    previousPath.current = currentPath;
+    setSelected(new Set());
+    setMenuEntry(null);
+    setMenuAnchor(null);
+    setForm(null);
+    setPropertiesFor(null);
+    setPendingDelete(null);
+    setManualRefresh(false);
+    setRefreshError(null);
+  }, [currentPath]);
   useEffect(() => { setSelected(new Set()); }, [listing?.listingToken]);
   const select = (entry: FileEntry, checked: boolean) => setSelected((previous) => { const next = new Set(previous); if (checked) next.add(entry.path); else next.delete(entry.path); return next; });
   const selectedEntries = entries.filter((entry) => selected.has(entry.path));
   const batchBody = (destination?: string) => ({ listing_token: listing?.listingToken, entries: selectedEntries.map(({ name, version }) => ({ name, version })), ...(destination !== undefined ? { destination } : {}) });
-  const doBatch = (endpoint: string, destination?: string) => { if (listing?.listingToken && selectedEntries.length) batch.mutate({ endpoint, body: batchBody(destination) }); };
+  const affectedDirectories = (destination?: string) => [...new Set([currentPath, ...(destination === undefined ? [] : [destination])])];
+  const doBatch = (endpoint: string, destination?: string) => {
+    if (listing?.listingToken && selectedEntries.length) batch.mutate({ endpoint, body: batchBody(destination), affectedDirectories: affectedDirectories(destination) });
+  };
   const performEntryAction = (action: EntryActionName, entry: FileEntry) => {
     setMenuEntry(null); setMenuAnchor(null);
     if (action === 'properties') return setPropertiesFor(entry);
-    if (action === 'edit') { setEditorFor(entry); setEditorOpen(true); return; }
+    if (action === 'edit') return navigate(editorRoute(entry.path), { state: { editorOrigin: location.pathname } });
     if (action === 'download') return window.location.assign(itemUrl('download', entry.path));
     if (action === 'preview') return window.location.assign(itemUrl('view', entry.path));
     if (action === 'rename') return setForm({ action: 'rename', entry });
     if (action === 'move' || action === 'copy') return setForm({ action, entry });
     if (action === 'delete') return setPendingDelete({ type: 'single', entry });
-    const endpoints: Record<string, string> = { archive: 'do/zip', extract: 'do/unzip', checksum: 'do/md5' };
-    if (action in endpoints) mutation.mutate({ endpoint: endpoints[action], values: { path: entry.path } });
+    const endpoints: Record<string, string> = { archive: 'do/zip', extract: 'do/extract', checksum: 'do/md5' };
+    if (action in endpoints) mutation.mutate({ endpoint: endpoints[action], values: { path: entry.path }, affectedDirectories: affectedDirectories() });
   };
   const signOut = async () => {
     try { await logout(); window.location.assign(itemUrl('d', '')); }
@@ -271,26 +267,26 @@ export function Workspace() {
   const confirmDelete = () => {
     if (!pendingDelete) return;
     if (pendingDelete.type === 'single') {
-      mutation.mutate({ endpoint: 'do/rm', values: { path: pendingDelete.entry.path } });
+      mutation.mutate({ endpoint: 'do/rm', values: { path: pendingDelete.entry.path }, affectedDirectories: affectedDirectories() });
     } else {
       doBatch('do/batch/delete');
     }
     setPendingDelete(null);
   };
 
-  const breadcrumbs = useMemo(() => {
-    const segments = listing ? listing.path.split('/').filter(Boolean) : [];
-    return segments;
-  }, [listing]);
+  const breadcrumbs = useMemo(() => currentPath.split('/').filter(Boolean), [currentPath]);
+  const closeEditor = () => {
+    const state = location.state as { editorOrigin?: unknown } | null;
+    const origin = typeof state?.editorOrigin === 'string'
+      && (state.editorOrigin === '/' || state.editorOrigin.startsWith('/d/'))
+      ? state.editorOrigin
+      : null;
+    if (origin) navigate(origin, { replace: true });
+    else navigate(directoryRoute(editorReturnPath), { replace: true });
+  };
 
-  if (listingQuery.isLoading) return (
-    <Stack component="main" sx={{ minHeight: '100dvh' }}>
-      <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
-        <Toolbar sx={{ gap: 1.5, px: { xs: 2, sm: 3 } }}>
-          <Box sx={{ lineHeight: 0 }}><Mark size={24} /></Box>
-          <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
-        </Toolbar>
-      </AppBar>
+  const listingContent = listingQuery.isLoading ? (
+    <Stack aria-label={t('editor.loading')} sx={{ width: '100%' }}>
       <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, sm: 3 }, py: 3, width: '100%' }}>
         <Skeleton variant="text" sx={{ width: 240, height: 36 }} />
         <Skeleton variant="text" sx={{ width: 160, height: 20, mt: 1 }} />
@@ -303,10 +299,8 @@ export function Workspace() {
         </TableContainer>
       </Box>
     </Stack>
-  );
-
-  if (!listing) return (
-    <Stack component="main" alignItems="center" justifyContent="center" sx={{ minHeight: '100dvh', p: 4 }}>
+  ) : !listing ? (
+    <Stack alignItems="center" justifyContent="center" sx={{ p: 4 }}>
       <Paper sx={{ ...surface, p: { xs: 3, sm: 4 }, maxWidth: 480 }}>
         <Stack spacing={2}>
           <Alert severity="error">{listingQuery.error instanceof ApiError ? t(`error.${listingQuery.error.code}`) : t('error.generic')}</Alert>
@@ -317,31 +311,16 @@ export function Workspace() {
         </Stack>
       </Paper>
     </Stack>
-  );
-
-  return <Box component="main" sx={{ minHeight: '100dvh' }}>
-    <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
-      <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
-        <Box sx={{ lineHeight: 0 }}><Mark size={22} /></Box>
-        <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
-        <AppearanceToggle />
-        <Tooltip title={locale === 'en' ? '中文' : 'English'}>
-          <IconButton aria-label={locale === 'en' ? t('language.switchToChinese') : t('language.switchToEnglish')} onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}><Translate /></IconButton>
-        </Tooltip>
-        <Tooltip title={t('app.signOut')}>
-          <IconButton aria-label={t('app.signOut')} onClick={() => void signOut()}><LogoutOutlined /></IconButton>
-        </Tooltip>
-      </Toolbar>
-    </AppBar>
+  ) : (
     <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, sm: 3 }, py: 3 }}>
       <Stack spacing={2.5}>
         <Box sx={{ display: 'flex', alignItems: { sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
           <Box sx={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}>
             <Typography component="h1" variant="display">{t('app.workspace')}</Typography>
             <Breadcrumbs aria-label="breadcrumb" sx={{ mt: .5, overflow: 'hidden' }}>
-              <Button onClick={() => navigateDirectory('')} size="small" sx={{ minWidth: 0, p: 0.5 }}>{t('workspace.root')}</Button>
+              <Button component={Link} to={directoryRoute('')} size="small" sx={{ minWidth: 0, p: 0.5 }}>{t('workspace.root')}</Button>
               {breadcrumbs.map((segment, index, all) => (
-                <Button onClick={() => navigateDirectory(all.slice(0, index + 1).join('/'))} size="small" key={`${segment}-${index}`} sx={{ minWidth: 0, p: 0.5 }}>{segment}</Button>
+                <Button component={Link} to={directoryRoute(all.slice(0, index + 1).join('/'))} size="small" key={`${segment}-${index}`} sx={{ minWidth: 0, p: 0.5 }}>{segment}</Button>
               ))}
             </Breadcrumbs>
           </Box>
@@ -354,7 +333,7 @@ export function Workspace() {
               disabled={refreshInProgress}
               onClick={() => void handleManualRefresh()}
             >
-              {refreshInProgress ? t('workspace.refreshing') : t('workspace.refreshFolder')}
+              {refreshInProgress ? t('workspace.refreshing') : t('workspace.refresh')}
             </Button>
             {mutable && <Button startIcon={<CreateNewFolder />} variant="outlined" onClick={() => setForm({ action: 'newdir' })}>{t('workspace.newFolder')}</Button>}
             {mutable && <Button startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>}
@@ -366,7 +345,7 @@ export function Workspace() {
         {listing.truncated && <Alert severity="warning">{t('workspace.truncated')}</Alert>}
         {listing.parentPath !== null && (
           <Paper sx={{ ...surface, px: 1, py: 0.5 }}>
-            <Button startIcon={<KeyboardArrowUp />} aria-label={t('workspace.parentDirectory')} onClick={() => navigateDirectory(listing.parentPath!)}>{t('workspace.upOneLevel')}</Button>
+            <Button component={Link} to={directoryRoute(listing.parentPath!)} startIcon={<KeyboardArrowUp />} aria-label={t('workspace.parentDirectory')}>{t('workspace.upOneLevel')}</Button>
           </Paper>
         )}
         {selectedEntries.length > 0 && <Paper sx={{ ...surface, p: 1.25, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -397,9 +376,10 @@ export function Workspace() {
                       </ListItemIcon>
                       <Box sx={{ minWidth: 0 }}>
                         <Typography
-                          component="button"
-                          type="button"
-                          onClick={() => entry.kind === 'directory' ? navigateDirectory(entry.path) : window.location.assign(itemUrl('download', entry.path))}
+                          component={entry.kind === 'directory' ? Link : 'button'}
+                          to={entry.kind === 'directory' ? directoryRoute(entry.path) : undefined}
+                          type={entry.kind === 'directory' ? undefined : 'button'}
+                          onClick={entry.kind === 'file' ? () => window.location.assign(itemUrl('download', entry.path)) : undefined}
                           color="inherit"
                           fontWeight={entry.kind === 'directory' ? 700 : 500}
                           sx={fileNameButtonSx}
@@ -440,11 +420,29 @@ export function Workspace() {
         </TableContainer>
       </Stack>
     </Box>
+  );
+
+  return <Box component="main" sx={{ minHeight: '100dvh' }}>
+    <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
+      <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
+        <Box sx={{ lineHeight: 0 }}><Mark size={22} /></Box>
+        <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
+        <AppearanceToggle />
+        <Tooltip title={locale === 'en' ? '中文' : 'English'}>
+          <IconButton aria-label={locale === 'en' ? t('language.switchToChinese') : t('language.switchToEnglish')} onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}><Translate /></IconButton>
+        </Tooltip>
+        <Tooltip title={t('app.signOut')}>
+          <IconButton aria-label={t('app.signOut')} onClick={() => void signOut()}><LogoutOutlined /></IconButton>
+        </Tooltip>
+      </Toolbar>
+    </AppBar>
+    {listingContent}
+    {listing && <>
     <EntryMenu entry={menuEntry} anchor={menuAnchor} onClose={() => { setMenuEntry(null); setMenuAnchor(null); }} onAction={performEntryAction} mutable={mutable} editorAvailable={Boolean(session?.capabilities.editorSave || session?.capabilities.browse)} />
-    <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => mutation.mutate({ endpoint, values })} onBatchSubmit={doBatch} />
+    <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => mutation.mutate({ endpoint, values, affectedDirectories: affectedDirectories(values.destination) })} onBatchSubmit={doBatch} />
     <PropertiesDialog entry={propertiesFor} properties={propertyQuery.data?.properties} isLoading={propertyQuery.isLoading} onClose={() => setPropertiesFor(null)} />
-    {activeEditor && isEditorOpen && <Suspense fallback={<Stack role="status" aria-live="polite" alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}><LazyEditorDialog entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={() => { setEditorFor(null); setEditorOpen(false); if (editorPath) { const destination = itemUrl('d', editorReturnPath); window.history.replaceState(null, '', destination); setRoutePathname(destination); } }} /></Suspense>}
-    {canUpload && <UploadQueueDrawer open={showUploads} onClose={() => setShowUploads(false)} destination={listing.path} username={session?.username ?? ''} onAllComplete={refresh} />}
+    {activeEditor && <Suspense fallback={<Stack role="status" aria-live="polite" alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}><LazyEditorDialog key={activeEditor.path} entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={closeEditor} onSaved={() => refreshDirectory(editorReturnPath)} /></Suspense>}
+    {canUpload && <UploadQueueDrawer open={showUploads} onClose={() => setShowUploads(false)} destination={listing.path} username={session?.username ?? ''} onAllComplete={(paths) => { for (const path of paths) void refreshDirectory(path); }} />}
     <DialogShell
       open={Boolean(pendingDelete)}
       onClose={() => setPendingDelete(null)}
@@ -458,6 +456,7 @@ export function Workspace() {
       <Typography color="text.secondary">{t('dialog.deleteText')}</Typography>
     </DialogShell>
     <Snackbar open={Boolean(notice)} autoHideDuration={6000} onClose={() => setNotice(null)}><Alert severity={notice?.severity ?? 'info'} variant="filled" onClose={() => setNotice(null)}>{notice?.message}</Alert></Snackbar>
+    </>}
   </Box>;
 }
 

@@ -506,6 +506,33 @@ func decodeBatch(c *gin.Context, manager *auth.Manager) (utils.Selection, batchR
 	return selection, request, err
 }
 
+func extractArchiveHandler(state *RuntimeState) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rawPath := c.PostForm("path")
+		cleanPath, pathErr := utils.CleanRelative(rawPath, false)
+		auditPath := cleanPath
+		if pathErr != nil {
+			auditPath = ""
+		}
+		if !requireAudit(c, state, "archive.extract", auditPath, 1) {
+			return
+		}
+		if pathErr != nil {
+			jsonError(c, operationStatus(pathErr), pathErr)
+			return
+		}
+		rel, err := utils.ExtractArchiveContext(c.Request.Context(), cleanPath)
+		if err != nil {
+			jsonError(c, operationStatus(err), err)
+			return
+		}
+		if !finishMutation(c, state, "archive.extract", rel, 1) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
+	}
+}
+
 func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 	if state == nil {
 		panic("runtime state is required")
@@ -1089,20 +1116,9 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 			}
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
-		mutations.POST("/do/unzip", func(c *gin.Context) {
-			if !requireAudit(c, state, "archive.extract", "", 1) {
-				return
-			}
-			rel, err := utils.ExtractArchive(c.PostForm("path"))
-			if err != nil {
-				jsonError(c, operationStatus(err), err)
-				return
-			}
-			if !finishMutation(c, state, "archive.extract", rel, 1) {
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"ok": true})
-		})
+		extractHandler := extractArchiveHandler(state)
+		mutations.POST("/do/extract", extractHandler)
+		mutations.POST("/do/unzip", extractHandler)
 		mutations.POST("/do/md5", func(c *gin.Context) {
 			if !requireAudit(c, state, "file.checksum", "", 1) {
 				return
