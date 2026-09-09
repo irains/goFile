@@ -244,7 +244,10 @@ jobs:
         shell: bash
         run: |
           docker rm --force fileharbor-ci-smoke 2>/dev/null || true
-          rm -rf "$RUNNER_TEMP/fileharbor-docker-smoke"
+          # The container runs as UID 10001 and may leave state files owned by
+          # that UID in the bind mounts. Remove them with runner privileges so
+          # cleanup cannot turn a completed smoke test into a failed job.
+          sudo rm -rf "$RUNNER_TEMP/fileharbor-docker-smoke"
       - name: Remove Docker diagnostics
         if: always()
         shell: bash
