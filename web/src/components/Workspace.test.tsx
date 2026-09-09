@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { I18nProvider } from '../i18n';
 import type { FileEntry } from '../api/client';
 import { EntryMenu, decodeRouteSplat, desktopTableColumnSx, directoryPathForEditor, entryKindLabel, fileNameButtonSx } from './Workspace';
+import { listingSelectionState } from './workspaceListing';
 import { entryMenuActions } from './entryActions';
 
 const file: FileEntry = {
@@ -45,6 +46,15 @@ describe('entry kind labels', () => {
 });
 
 describe('workspace table layout', () => {
+  it('limits select-all and batch candidates to the displayed entries', () => {
+    const archive = { ...file, name: 'archive.zip', path: 'archive.zip', isArchive: true };
+    const state = listingSelectionState([archive], new Set([archive.path, file.path]));
+
+    expect(state.selectedEntries).toEqual([archive]);
+    expect(state.allSelected).toBe(true);
+    expect(state.partiallySelected).toBe(false);
+  });
+
   it('preserves wrapping names while reserving only the natural modified-time width', () => {
     expect(desktopTableColumnSx.name).toEqual({ width: '100%' });
     expect(desktopTableColumnSx.modified).toEqual({ width: '1%', whiteSpace: 'nowrap' });

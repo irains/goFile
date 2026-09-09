@@ -69,6 +69,7 @@ import { entryMenuActions, hoverActionNames, type EntryAction, type EntryActionN
 import { formatBytes } from '../formatBytes';
 import { FolderDestinationPicker } from './FolderDestinationPicker';
 import { fontFamilyMono, surface } from '../tokens';
+import { EMPTY_ENTRIES, filterAndSortEntries, listingSelectionState, type ListingKindFilter, type ListingSort } from './workspaceListing';
 
 const LazyEditorDialog = lazy(() => import('../editor/EditorDialog').then((module) => ({ default: module.EditorDialog })));
 type FormAction = 'newdir' | 'newfile' | 'rename' | 'move' | 'copy';
@@ -159,6 +160,8 @@ export function Workspace() {
   const editorPath = /^\/edit(?:\/|$)/.test(routePathname) ? decodeRouteSplat(routeParams['*']) || null : null;
   const currentPath = directoryPathForEditor(editorPath, /^\/d(?:\/|$)/.test(routePathname) ? decodeRouteSplat(routeParams['*']) : '');
   const previousPath = useRef(currentPath);
+  const previousListingToken = useRef<string | undefined>(undefined);
+  const previousListingControls = useRef<{ query: string; kind: ListingKindFilter; sort: ListingSort } | null>(null);
   const currentPathRef = useRef(currentPath);
   currentPathRef.current = currentPath;
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -170,13 +173,19 @@ export function Workspace() {
   const [notice, setNotice] = useState<{ message: string; severity: AlertColor } | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [kindFilter, setKindFilter] = useState<ListingKindFilter>('all');
+  const [listingSort, setListingSort] = useState<ListingSort>('name-asc');
   const [pendingDelete, setPendingDelete] = useState<{ type: 'single'; entry: FileEntry } | { type: 'batch'; entries: FileEntry[] } | null>(null);
   const compact = useMediaQuery(theme.breakpoints.down('md'));
   const listingQuery = useQuery({ queryKey: ['listing', currentPath], queryFn: () => api.getListing(currentPath) });
   const listing = listingQuery.data;
   const isRefreshing = listingQuery.isFetching && !listingQuery.isLoading;
   const refreshInProgress = manualRefresh || isRefreshing;
-  const entries = listing?.entries ?? [];
+  const listingToken = listing?.listingToken;
+  const entries = listing?.entries ?? EMPTY_ENTRIES;
+  const selectedForCurrentToken = previousListingToken.current === undefined || previousListingToken.current === listingToken ? selected : new Set<string>();
+  const displayedEntries = useMemo(() => filterAndSortEntries(entries, { query: searchQuery, kind: kindFilter, sort: listingSort }), [entries, searchQuery, kindFilter, listingSort]);
   const routeEditor = editorPath ? {
     name: editorPath.split('/').pop() ?? editorPath,
     path: editorPath,
@@ -239,10 +248,29 @@ export function Workspace() {
     setPendingDelete(null);
     setManualRefresh(false);
     setRefreshError(null);
+    setSearchQuery('');
+    setKindFilter('all');
+    setListingSort('name-asc');
   }, [currentPath]);
-  useEffect(() => { setSelected(new Set()); }, [listing?.listingToken]);
+  useEffect(() => {
+    if (previousListingToken.current !== undefined && previousListingToken.current !== listingToken) setSelected(new Set());
+    previousListingToken.current = listingToken;
+  }, [listingToken]);
+  useEffect(() => {
+    const nextControls = { query: searchQuery, kind: kindFilter, sort: listingSort };
+    if (previousListingControls.current !== null
+      && (previousListingControls.current.query !== nextControls.query
+        || previousListingControls.current.kind !== nextControls.kind
+        || previousListingControls.current.sort !== nextControls.sort)) setSelected(new Set());
+    previousListingControls.current = nextControls;
+  }, [searchQuery, kindFilter, listingSort]);
+  const updateListingControls = (update: () => void) => {
+    setSelected(new Set());
+    update();
+  };
   const select = (entry: FileEntry, checked: boolean) => setSelected((previous) => { const next = new Set(previous); if (checked) next.add(entry.path); else next.delete(entry.path); return next; });
-  const selectedEntries = entries.filter((entry) => selected.has(entry.path));
+  const selectionState = listingSelectionState(displayedEntries, selectedForCurrentToken);
+  const { selectedEntries } = selectionState;
   const batchBody = (destination?: string) => ({ listing_token: listing?.listingToken, entries: selectedEntries.map(({ name, version }) => ({ name, version })), ...(destination !== undefined ? { destination } : {}) });
   const affectedDirectories = (destination?: string) => [...new Set([currentPath, ...(destination === undefined ? [] : [destination])])];
   const doBatch = (endpoint: string, destination?: string) => {
@@ -342,12 +370,53 @@ export function Workspace() {
         </Box>
         {refreshError && <Alert severity="warning" action={<Button color="inherit" size="small" disabled={refreshInProgress} onClick={() => void handleManualRefresh()}>{t('action.retry')}</Button>}>{refreshError}</Alert>}
         {manualRefresh && <Typography role="status" aria-live="polite" sx={{ position: 'absolute', width: 1, height: 1, p: 0, m: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}>{t('workspace.refreshing')}</Typography>}
-        {listing.truncated && <Alert severity="warning">{t('workspace.truncated')}</Alert>}
+        {listing.truncated && <Alert severity="warning"><Stack spacing={0.5}><span>{t('workspace.truncated')}</span><span>{t('workspace.truncatedFiltering')}</span></Stack></Alert>}
         {listing.parentPath !== null && (
           <Paper sx={{ ...surface, px: 1, py: 0.5 }}>
             <Button component={Link} to={directoryRoute(listing.parentPath!)} startIcon={<KeyboardArrowUp />} aria-label={t('workspace.parentDirectory')}>{t('workspace.upOneLevel')}</Button>
           </Paper>
         )}
+        <Paper sx={{ ...surface, p: { xs: 1.25, sm: 1.5 } }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
+            <TextField
+              fullWidth
+              size="small"
+              label={t('workspace.search')}
+              placeholder={t('workspace.searchPlaceholder')}
+              value={searchQuery}
+              onChange={(event) => updateListingControls(() => setSearchQuery(event.target.value))}
+              slotProps={{ htmlInput: { type: 'search' } }}
+            />
+            <TextField
+              select
+              size="small"
+              label={t('workspace.filter')}
+              value={kindFilter}
+              onChange={(event) => updateListingControls(() => setKindFilter(event.target.value as ListingKindFilter))}
+              sx={{ minWidth: { md: 164 } }}
+            >
+              <MenuItem value="all">{t('workspace.filterAll')}</MenuItem>
+              <MenuItem value="file">{t('workspace.filterFiles')}</MenuItem>
+              <MenuItem value="directory">{t('workspace.filterFolders')}</MenuItem>
+              <MenuItem value="archive">{t('workspace.filterArchives')}</MenuItem>
+            </TextField>
+            <TextField
+              select
+              size="small"
+              label={t('workspace.sort')}
+              value={listingSort}
+              onChange={(event) => updateListingControls(() => setListingSort(event.target.value as ListingSort))}
+              sx={{ minWidth: { md: 216 } }}
+            >
+              <MenuItem value="name-asc">{t('workspace.sortNameAsc')}</MenuItem>
+              <MenuItem value="name-desc">{t('workspace.sortNameDesc')}</MenuItem>
+              <MenuItem value="modified-desc">{t('workspace.sortModifiedDesc')}</MenuItem>
+              <MenuItem value="modified-asc">{t('workspace.sortModifiedAsc')}</MenuItem>
+              <MenuItem value="size-desc">{t('workspace.sortSizeDesc')}</MenuItem>
+              <MenuItem value="size-asc">{t('workspace.sortSizeAsc')}</MenuItem>
+            </TextField>
+          </Stack>
+        </Paper>
         {selectedEntries.length > 0 && <Paper sx={{ ...surface, p: 1.25, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Typography variant="bodyStrong" sx={{ mr: 1 }}>{t('workspace.selected', { count: selectedEntries.length })}</Typography>
           {mutable && <Button size="small" startIcon={<Folder />} onClick={() => setForm({ action: 'move' })}>{t('action.move')}</Button>}
@@ -359,16 +428,16 @@ export function Workspace() {
         <TableContainer component={Paper} aria-busy={refreshInProgress || undefined} sx={surface}>
           <Table stickyHeader size={compact ? 'small' : 'medium'} aria-label={t('app.workspace')}>
             <TableHead><TableRow>
-              <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectAll')} checked={entries.length > 0 && selected.size === entries.length} indeterminate={selected.size > 0 && selected.size < entries.length} onChange={(event) => setSelected(event.target.checked ? new Set(entries.map((entry) => entry.path)) : new Set())} /></TableCell>
+              <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectAll')} checked={selectionState.allSelected} indeterminate={selectionState.partiallySelected} onChange={(event) => setSelected(event.target.checked ? new Set(displayedEntries.map((entry) => entry.path)) : new Set())} /></TableCell>
               <TableCell sx={desktopTableColumnSx.name}>{t('workspace.name')}</TableCell>
               {!compact && <TableCell>{t('workspace.size')}</TableCell>}
               {!compact && <TableCell sx={desktopTableColumnSx.modified}>{t('workspace.modified')}</TableCell>}
               <TableCell align="right" sx={{ width: 160 }}>{t('workspace.actions')}</TableCell>
             </TableRow></TableHead>
             <TableBody>
-              {entries.map((entry) => (
-                <TableRow hover key={entry.path} selected={selected.has(entry.path)}>
-                  <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectItem', { name: entry.name })} checked={selected.has(entry.path)} onChange={(event) => select(entry, event.target.checked)} /></TableCell>
+              {displayedEntries.map((entry) => (
+                <TableRow hover key={entry.path} selected={selectedForCurrentToken.has(entry.path)}>
+                  <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectItem', { name: entry.name })} checked={selectedForCurrentToken.has(entry.path)} onChange={(event) => select(entry, event.target.checked)} /></TableCell>
                   <TableCell sx={{ maxWidth: 0 }}>
                     <Stack direction="row" spacing={1.25} alignItems="center">
                       <ListItemIcon sx={{ minWidth: 28, color: entry.kind === 'directory' ? 'primary.light' : 'text.secondary' }}>
@@ -403,7 +472,7 @@ export function Workspace() {
                   </TableCell>
                 </TableRow>
               ))}
-              {entries.length === 0 && (
+              {entries.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={compact ? 3 : 5}>
                     <EmptyState
@@ -411,6 +480,17 @@ export function Workspace() {
                       title={t('workspace.emptyTitle')}
                       caption={t('workspace.emptyHint')}
                       action={canUpload ? <Button variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button> : undefined}
+                    />
+                  </TableCell>
+                </TableRow>
+              ) : displayedEntries.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={compact ? 3 : 5}>
+                    <EmptyState
+                      icon={<FolderOffOutlined />}
+                      title={t('workspace.noMatchesTitle')}
+                      caption={t('workspace.noMatchesHint')}
+                      action={<Button onClick={() => updateListingControls(() => { setSearchQuery(''); setKindFilter('all'); })}>{t('workspace.clearFilters')}</Button>}
                     />
                   </TableCell>
                 </TableRow>

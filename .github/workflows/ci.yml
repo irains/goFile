@@ -6,6 +6,9 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   frontend:
     name: Frontend
@@ -35,6 +38,16 @@ jobs:
       - name: Browser test
         working-directory: web
         run: npm run test:e2e
+      - name: Upload browser test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-playwright-diagnostics
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: warn
+          retention-days: 7
       - name: Remove generated frontend output
         shell: bash
         run: rm -rf assets/web
@@ -50,8 +63,195 @@ jobs:
           git diff --exit-code -- assets/web
           test -z "$(git ls-files --others --exclude-standard -- assets/web)"
 
-  verify:
+  service-integration:
+    name: Go service integration
     needs: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:18089
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install browser-test dependencies
+        working-directory: web
+        run: npm ci
+      - name: Install Chromium for browser tests
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Run real Go service browser integration
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          work_dir="$RUNNER_TEMP/fileharbor-service-integration"
+          data_dir="$work_dir/data"
+          state_dir="$work_dir/state"
+          log_file="$work_dir/service.log"
+          username="fileharbor-ci"
+          password="$(openssl rand -hex 24)"
+          password_hash="$(FILEHARBOR_TEST_PASSWORD="$password" go run ../.github/scripts/generate_bcrypt_hash.go)"
+          session_secret="$(openssl rand -hex 32)"
+          api_token="$(openssl rand -hex 32)"
+          printf '::add-mask::%s\n' "$password"
+          printf '::add-mask::%s\n' "$password_hash"
+          printf '::add-mask::%s\n' "$session_secret"
+          printf '::add-mask::%s\n' "$api_token"
+          mkdir -p "$data_dir/service-fixture" "$state_dir"
+          printf 'service integration fixture\n' > "$data_dir/service-fixture/seed.txt"
+          go build -o "$work_dir/fileharbor" ..
+          FILEHARBOR_ADMIN_USERNAME="$username" \
+          FILEHARBOR_ADMIN_PASSWORD_HASH="$password_hash" \
+          FILEHARBOR_SESSION_SECRET="$session_secret" \
+          FILEHARBOR_API_TOKEN="$api_token" \
+          "$work_dir/fileharbor" \
+            -host 127.0.0.1 \
+            -port 18089 \
+            -path "$data_dir" \
+            -state-dir "$state_dir" \
+            > "$log_file" 2>&1 &
+          pid=$!
+          cleanup() {
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18089/healthz && \
+              curl --fail --silent --show-error http://127.0.0.1:18089/readyz; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              tail -n 200 "$log_file" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+          PLAYWRIGHT_BASE_URL="$PLAYWRIGHT_BASE_URL" \
+          FILEHARBOR_E2E_USERNAME="$username" \
+          FILEHARBOR_E2E_PASSWORD="$password" \
+          npm run test:e2e -- service.spec.ts --reporter=line --output="$RUNNER_TEMP/fileharbor-service-playwright-results"
+      - name: Upload Go service log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-service-integration-log
+          path: ${{ runner.temp }}/fileharbor-service-integration/service.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove service test files
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/fileharbor-service-integration" \
+            "$RUNNER_TEMP/fileharbor-service-playwright-results" \
+            web/playwright-report
+
+  docker-smoke:
+    name: Docker smoke
+    needs: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build Docker image
+        run: docker build --tag fileharbor-ci-smoke .
+      - name: Run Docker health, readiness, and shell smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          username="fileharbor-ci"
+          password="$(openssl rand -hex 24)"
+          password_hash="$(FILEHARBOR_TEST_PASSWORD="$password" go run .github/scripts/generate_bcrypt_hash.go)"
+          session_secret="$(openssl rand -hex 32)"
+          api_token="$(openssl rand -hex 32)"
+          printf '::add-mask::%s\n' "$password"
+          printf '::add-mask::%s\n' "$password_hash"
+          printf '::add-mask::%s\n' "$session_secret"
+          printf '::add-mask::%s\n' "$api_token"
+          export FILEHARBOR_ADMIN_USERNAME="$username"
+          export FILEHARBOR_ADMIN_PASSWORD_HASH="$password_hash"
+          export FILEHARBOR_SESSION_SECRET="$session_secret"
+          export FILEHARBOR_API_TOKEN="$api_token"
+          data_dir="$RUNNER_TEMP/fileharbor-docker-smoke/data"
+          state_dir="$RUNNER_TEMP/fileharbor-docker-smoke/state"
+          mkdir -p "$data_dir" "$state_dir"
+          sudo chown 10001:10001 "$data_dir" "$state_dir"
+          docker run --detach --name fileharbor-ci-smoke \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 256 \
+            --memory 512m \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m \
+            --health-cmd 'wget -q -O /dev/null http://127.0.0.1:8089/readyz' \
+            --health-interval 1s \
+            --health-timeout 3s \
+            --health-retries 20 \
+            --publish 127.0.0.1:18089:8089 \
+            --mount type=bind,source="$data_dir",target=/data \
+            --mount type=bind,source="$state_dir",target=/state \
+            --env FILEHARBOR_ADMIN_USERNAME \
+            --env FILEHARBOR_ADMIN_PASSWORD_HASH \
+            --env FILEHARBOR_SESSION_SECRET \
+            --env FILEHARBOR_API_TOKEN \
+            fileharbor-ci-smoke >/dev/null
+          for attempt in {1..30}; do
+            if [[ "$(docker inspect --format '{{.State.Health.Status}}' fileharbor-ci-smoke)" == healthy ]] && \
+              curl --fail --silent --show-error http://127.0.0.1:18089/healthz && \
+              curl --fail --silent --show-error http://127.0.0.1:18089/readyz; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error http://127.0.0.1:18089/login | grep --quiet --fixed-strings 'id="root"'
+          docker exec fileharbor-ci-smoke sh -ec '
+            test "$(id -u)" = 10001
+            test -r /app/fileharbor
+            test ! -w /app/fileharbor
+            test -w /data
+            test -w /state
+            wget -q -O /dev/null http://127.0.0.1:8089/readyz
+          '
+      - name: Capture Docker diagnostics
+        if: always()
+        shell: bash
+        run: docker logs fileharbor-ci-smoke > "$RUNNER_TEMP/fileharbor-docker-smoke.log" 2>&1 || true
+      - name: Upload Docker diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-smoke-diagnostics
+          path: ${{ runner.temp }}/fileharbor-docker-smoke.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove Docker smoke resources
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force fileharbor-ci-smoke 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/fileharbor-docker-smoke"
+      - name: Remove Docker diagnostics
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/fileharbor-docker-smoke.log"
+
+  verify:
+    needs: [frontend, service-integration, docker-smoke]
     strategy:
       fail-fast: false
       matrix:

@@ -1,0 +1,1 @@
+import{j as a}from"./react-D2EREKHA.js";const e=""+new URL("fileharbor-logo-COXRcvQZ.svg",import.meta.url).href;function l({size:r=24,className:t,title:o}){return a.jsx("img",{src:e,width:r,height:r,className:t,alt:o??"","aria-hidden":o?void 0:!0,style:{display:"block",flex:"0 0 auto"}})}export{l as M};

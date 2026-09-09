@@ -1,15 +1,21 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom';
-import { LoginPage } from './components/LoginPage';
-import { Workspace } from './components/Workspace';
 import { getRuntime } from './runtime';
 import { SessionProvider } from './session/SessionProvider';
 
+const LoginPage = lazy(() => import('./components/LoginPage').then((module) => ({ default: module.LoginPage })));
+const Workspace = lazy(() => import('./components/Workspace').then((module) => ({ default: module.Workspace })));
+
+function RouteFallback() {
+  return null;
+}
+
 function LoginRoute() {
-  return <SessionProvider loginPage><LoginPage /></SessionProvider>;
+  return <SessionProvider loginPage><Suspense fallback={<RouteFallback />}><LoginPage /></Suspense></SessionProvider>;
 }
 
 function ProtectedShell() {
-  return <SessionProvider loginPage={false}><Outlet /></SessionProvider>;
+  return <SessionProvider loginPage={false}><Suspense fallback={<RouteFallback />}><Outlet /></Suspense></SessionProvider>;
 }
 
 function UnknownRoute() {
