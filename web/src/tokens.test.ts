@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createAppTheme, fontFamilyMono, radii, semantic, spacing, surface, motion } from './tokens';
+import { accentIds, accentPalettes } from './theme';
 
 const relativeLuminance = (hex: string) => {
   const channels = hex.slice(1).match(/.{2}/g)!.map((value) => Number.parseInt(value, 16) / 255);
@@ -49,8 +50,8 @@ describe('design tokens', () => {
     expect(surface).toMatchObject({ borderRadius: `${radii.md}px`, bgcolor: 'background.paper' });
   });
 
-  it('uses explicit warm material roles in both schemes', () => {
-    const theme = createAppTheme();
+  it('uses explicit warm material roles for the default Forest preset', () => {
+    const theme = createAppTheme('forest');
     const colorSchemes = (theme as unknown as {
       colorSchemes: {
         light: { palette: { background: { default: string; paper: string }; primary: { main: string }; info: { main: string } } };
@@ -69,14 +70,48 @@ describe('design tokens', () => {
     expect(dark.info?.main).toBe('#84C5CC');
   });
 
-  it('keeps primary text and material accents contrast-safe', () => {
-    expect(contrast('#242820', '#FBF9F2')).toBeGreaterThanOrEqual(4.5);
-    expect(contrast('#3C6A4D', '#FBF9F2')).toBeGreaterThanOrEqual(4.5);
-    expect(contrast('#286470', '#FBF9F2')).toBeGreaterThanOrEqual(4.5);
-    expect(contrast('#F0F1E7', '#222A22')).toBeGreaterThanOrEqual(4.5);
-    expect(contrast('#9EC6A0', '#171D18')).toBeGreaterThanOrEqual(4.5);
+  it('keeps text, primary actions, and fixed semantic colors contrast-safe for every preset', () => {
+    for (const accentId of accentIds) {
+      const theme = createAppTheme(accentId);
+      const colorSchemes = (theme as unknown as {
+        colorSchemes: {
+          light: { palette: { background: { paper: string }; primary: { main: string; contrastText: string }; success: { main: string }; warning: { main: string }; error: { main: string }; info: { main: string } } };
+          dark: { palette: { background: { default: string; paper: string }; primary: { main: string; contrastText: string }; success: { main: string }; warning: { main: string }; error: { main: string }; info: { main: string } } };
+        };
+      }).colorSchemes;
+      const light = colorSchemes.light.palette;
+      const dark = colorSchemes.dark.palette;
+      expect(light.primary.main).toBe(accentPalettes[accentId].light.main);
+      expect(dark.primary.main).toBe(accentPalettes[accentId].dark.main);
+      expect(contrast(light.primary.main, light.background.paper)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(light.primary.contrastText, light.primary.main)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(dark.primary.main, dark.background.default)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(dark.primary.contrastText, dark.primary.main)).toBeGreaterThanOrEqual(4.5);
+      expect(light.success.main).toBe('#3C6A4D');
+      expect(light.warning.main).toBe('#9A651D');
+      expect(light.error.main).toBe('#A2443C');
+      expect(light.info.main).toBe('#286470');
+      expect(dark.success.main).toBe('#9EC6A0');
+      expect(dark.warning.main).toBe('#E6B76E');
+      expect(dark.error.main).toBe('#F0A19A');
+      expect(dark.info.main).toBe('#84C5CC');
+    }
   });
 
+  it('keeps primary text and material surfaces contrast-safe', () => {
+    expect(contrast('#242820', '#FBF9F2')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast('#286470', '#FBF9F2')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast('#F0F1E7', '#222A22')).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('derives light-mode component shadows from the selected primary color', () => {
+    const harbor = createAppTheme('harbor');
+    const button = harbor.components?.MuiButton?.styleOverrides;
+    const root = button?.root as ((props: { theme: typeof harbor }) => Record<string, unknown>);
+    const lightHarbor = { ...harbor, palette: { ...harbor.palette, mode: 'light' as const, primary: { ...harbor.palette.primary, dark: '#174D5A' } } };
+    const hover = root({ theme: lightHarbor })['&:hover'] as { boxShadow: string };
+    expect(hover.boxShadow).toContain('rgba(23, 77, 90');
+  });
   it('supports fractional spacing used by compact stacks and rows', () => {
     const theme = createAppTheme();
     expect(theme.spacing(1.5)).toContain('1.5 * var(--mui-spacing, 4px)');

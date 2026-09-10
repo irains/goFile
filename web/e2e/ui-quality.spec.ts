@@ -49,7 +49,9 @@ test('login labels stay within the outlined controls after focus', async ({ page
 test('operation dialog labels stay inside the content area', async ({ page }) => {
   await mockWorkspaceApi(page);
   await page.goto('/');
-  await page.getByRole('button', { name: '切换语言为中文' }).click();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('radio', { name: '简体中文' }).click();
+  await page.getByRole('button', { name: '关闭' }).click();
   await page.getByRole('button', { name: '新建文件夹' }).click();
 
   const dialog = page.getByRole('dialog');
@@ -170,6 +172,24 @@ test('refresh folder is visible, responsive, and updates the listing', async ({ 
   await expect(page.getByText('refreshed.txt')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   expect(listingRequests).toBe(2);
+
+  const metrics = await page.locator('body').evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
+  expect(metrics.scrollWidth).toBe(metrics.clientWidth);
+});
+
+test('settings persists a selected accent without a mobile overflow', async ({ page }) => {
+  await mockWorkspaceApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await page.getByRole('radio', { name: 'Harbor' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-fileharbor-accent', 'harbor');
+  await expect(page.getByRole('radio', { name: 'Harbor' })).toBeChecked();
+  await page.reload();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('radio', { name: 'Harbor' })).toBeChecked();
 
   const metrics = await page.locator('body').evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
   expect(metrics.scrollWidth).toBe(metrics.clientWidth);

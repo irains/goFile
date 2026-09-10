@@ -4,23 +4,19 @@ import {
   Archive,
   ContentCopy,
   CreateNewFolder,
-  DarkModeOutlined,
   Delete,
   DescriptionOutlined,
-  DesktopWindowsOutlined,
   DownloadOutlined,
   Folder,
   FolderOffOutlined,
   KeyboardArrowUp,
   InfoOutlined,
-  LightModeOutlined,
   LogoutOutlined,
   MoreVert,
   Refresh,
-  Translate,
+  SettingsOutlined,
   UploadFile
 } from '@mui/icons-material';
-import type { SvgIconComponent } from '@mui/icons-material';
 import {
   Alert,
   type AlertColor,
@@ -52,7 +48,7 @@ import {
   Typography,
   useMediaQuery
 } from '@mui/material';
-import { useColorScheme, useTheme } from '@mui/material/styles';
+import { useTheme } from '@mui/material/styles';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useMatches, useNavigate } from 'react-router-dom';
 import { api, ApiError, type FileEntry, type Properties } from '../api/client';
@@ -64,7 +60,7 @@ import { DialogShell } from './DialogShell';
 import { SidePanel } from './SidePanel';
 import { EmptyState } from './EmptyState';
 import { UploadQueueDrawer } from './UploadQueueDrawer';
-import { nextThemeMode, type ThemeMode } from '../theme';
+import { SettingsPanel } from './SettingsPanel';
 import { entryMenuActions, hoverActionNames, type EntryAction, type EntryActionName } from './entryActions';
 import { formatBytes } from '../formatBytes';
 import { FolderDestinationPicker } from './FolderDestinationPicker';
@@ -79,6 +75,7 @@ const fmtDate = (value: string | number) => value ? new Date(value).toLocaleStri
 export const entryKindLabel = (kind: FileEntry['kind'], t: (key: string) => string) => t(kind === 'directory' ? 'workspace.folder' : 'workspace.file');
 export const desktopTableColumnSx = {
   name: { width: '100%' },
+  size: { width: '1%', whiteSpace: 'nowrap' },
   modified: { width: '1%', whiteSpace: 'nowrap' }
 } as const;
 export const fileNameButtonSx = {
@@ -102,24 +99,6 @@ export function directoryPathForEditor(editorPath: string | null, directoryPath 
     return segments.slice(0, -1).join('/');
   }
   return directoryPath;
-}
-
-function AppearanceToggle() {
-  const { mode, setMode } = useColorScheme();
-  const { t } = useI18n();
-  if (mode === undefined) return null;
-  const intent = mode as ThemeMode;
-  const next = nextThemeMode(intent);
-  const labelMap: Record<ThemeMode, string> = { light: t('appearance.switchToLight'), dark: t('appearance.switchToDark'), system: t('appearance.switchToSystem') };
-  const label = labelMap[next];
-  const Icon: SvgIconComponent = next === 'light' ? LightModeOutlined : next === 'dark' ? DarkModeOutlined : DesktopWindowsOutlined;
-  return (
-    <Tooltip title={label}>
-      <IconButton aria-label={label} onClick={() => setMode(next)}>
-        <Icon />
-      </IconButton>
-    </Tooltip>
-  );
 }
 
 function RowActions({ entry, mutable, editorAvailable, onAction, onMenu }: { entry: FileEntry; mutable: boolean; editorAvailable: boolean; onAction: (name: EntryActionName) => void; onMenu: (event: React.MouseEvent<HTMLElement>) => void }) {
@@ -149,7 +128,7 @@ function RowActions({ entry, mutable, editorAvailable, onAction, onMenu }: { ent
 
 export function Workspace() {
   const theme = useTheme();
-  const { t, locale, setLocale } = useI18n();
+  const { t } = useI18n();
   const { session, logout } = useSession();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -170,12 +149,13 @@ export function Workspace() {
   const [form, setForm] = useState<FormState>(null);
   const [propertiesFor, setPropertiesFor] = useState<FileEntry | null>(null);
   const [showUploads, setShowUploads] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [notice, setNotice] = useState<{ message: string; severity: AlertColor } | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [kindFilter, setKindFilter] = useState<ListingKindFilter>('all');
-  const [listingSort, setListingSort] = useState<ListingSort>('name-asc');
+  const [listingSort, setListingSort] = useState<ListingSort>('folders-first');
   const [pendingDelete, setPendingDelete] = useState<{ type: 'single'; entry: FileEntry } | { type: 'batch'; entries: FileEntry[] } | null>(null);
   const compact = useMediaQuery(theme.breakpoints.down('md'));
   const listingQuery = useQuery({ queryKey: ['listing', currentPath], queryFn: () => api.getListing(currentPath) });
@@ -250,7 +230,7 @@ export function Workspace() {
     setRefreshError(null);
     setSearchQuery('');
     setKindFilter('all');
-    setListingSort('name-asc');
+    setListingSort('folders-first');
   }, [currentPath]);
   useEffect(() => {
     if (previousListingToken.current !== undefined && previousListingToken.current !== listingToken) setSelected(new Set());
@@ -408,6 +388,7 @@ export function Workspace() {
               onChange={(event) => updateListingControls(() => setListingSort(event.target.value as ListingSort))}
               sx={{ minWidth: { md: 216 } }}
             >
+              <MenuItem value="folders-first">{t('workspace.sortFoldersFirst')}</MenuItem>
               <MenuItem value="name-asc">{t('workspace.sortNameAsc')}</MenuItem>
               <MenuItem value="name-desc">{t('workspace.sortNameDesc')}</MenuItem>
               <MenuItem value="modified-desc">{t('workspace.sortModifiedDesc')}</MenuItem>
@@ -430,7 +411,7 @@ export function Workspace() {
             <TableHead><TableRow>
               <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectAll')} checked={selectionState.allSelected} indeterminate={selectionState.partiallySelected} onChange={(event) => setSelected(event.target.checked ? new Set(displayedEntries.map((entry) => entry.path)) : new Set())} /></TableCell>
               <TableCell sx={desktopTableColumnSx.name}>{t('workspace.name')}</TableCell>
-              {!compact && <TableCell>{t('workspace.size')}</TableCell>}
+              {!compact && <TableCell sx={desktopTableColumnSx.size}>{t('workspace.size')}</TableCell>}
               {!compact && <TableCell sx={desktopTableColumnSx.modified}>{t('workspace.modified')}</TableCell>}
               <TableCell align="right" sx={{ width: 160 }}>{t('workspace.actions')}</TableCell>
             </TableRow></TableHead>
@@ -459,7 +440,7 @@ export function Workspace() {
                       </Box>
                     </Stack>
                   </TableCell>
-                  {!compact && <TableCell>{entry.kind === 'file' ? formatBytes(entry.sizeBytes) : '—'}</TableCell>}
+                  {!compact && <TableCell sx={desktopTableColumnSx.size}>{entry.kind === 'file' ? formatBytes(entry.sizeBytes) : '—'}</TableCell>}
                   {!compact && <TableCell sx={desktopTableColumnSx.modified}>{fmtDate(entry.modifiedAt)}</TableCell>}
                   <TableCell align="right" sx={{ width: 160 }}>
                     <RowActions
@@ -507,9 +488,8 @@ export function Workspace() {
       <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
         <Box sx={{ lineHeight: 0 }}><Mark size={22} /></Box>
         <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
-        <AppearanceToggle />
-        <Tooltip title={locale === 'en' ? '中文' : 'English'}>
-          <IconButton aria-label={locale === 'en' ? t('language.switchToChinese') : t('language.switchToEnglish')} onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}><Translate /></IconButton>
+        <Tooltip title={t('app.settings')}>
+          <IconButton aria-label={t('app.settings')} onClick={() => setSettingsOpen(true)}><SettingsOutlined /></IconButton>
         </Tooltip>
         <Tooltip title={t('app.signOut')}>
           <IconButton aria-label={t('app.signOut')} onClick={() => void signOut()}><LogoutOutlined /></IconButton>
@@ -518,6 +498,7 @@ export function Workspace() {
     </AppBar>
     {listingContent}
     {listing && <>
+    <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     <EntryMenu entry={menuEntry} anchor={menuAnchor} onClose={() => { setMenuEntry(null); setMenuAnchor(null); }} onAction={performEntryAction} mutable={mutable} editorAvailable={Boolean(session?.capabilities.editorSave || session?.capabilities.browse)} />
     <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => mutation.mutate({ endpoint, values, affectedDirectories: affectedDirectories(values.destination) })} onBatchSubmit={doBatch} />
     <PropertiesDialog entry={propertiesFor} properties={propertyQuery.data?.properties} isLoading={propertyQuery.isLoading} onClose={() => setPropertiesFor(null)} />

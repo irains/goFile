@@ -23,9 +23,18 @@ describe('filterAndSortEntries', () => {
     expect(filterAndSortEntries(entries, { query: '', kind: 'directory', sort: 'name-desc' }).map(({ name }) => name)).toEqual(['alpha']);
   });
 
-  it('sorts deterministically by modified time and then path', () => {
+  it('uses folders-first only when that sort mode is selected', () => {
+    expect(filterAndSortEntries(entries, { query: '', kind: 'all', sort: 'folders-first' }).map(({ name }) => name)).toEqual(['alpha', 'archive.zip', 'duplicate.txt', 'duplicate.txt', 'notes 10.txt', 'Zulu.txt']);
+  });
+
+  it('sorts globally by modified time and retains deterministic path ties', () => {
     expect(filterAndSortEntries(entries, { query: '', kind: 'all', sort: 'modified-asc' }).map(({ name }) => name)).toEqual(['notes 10.txt', 'Zulu.txt', 'alpha', 'archive.zip', 'duplicate.txt', 'duplicate.txt']);
     expect(filterAndSortEntries(entries, { query: '', kind: 'all', sort: 'modified-desc' }).filter(({ name }) => name === 'duplicate.txt').map(({ path }) => path)).toEqual(['duplicate-a.txt', 'duplicate-b.txt']);
+  });
+
+  it('sorts names and sizes globally when folders-first is not selected', () => {
+    expect(filterAndSortEntries(entries, { query: '', kind: 'all', sort: 'name-asc' }).map(({ name }) => name)).toEqual(['alpha', 'archive.zip', 'duplicate.txt', 'duplicate.txt', 'notes 10.txt', 'Zulu.txt']);
+    expect(filterAndSortEntries(entries, { query: '', kind: 'all', sort: 'size-desc' }).map(({ name }) => name)).toEqual(['archive.zip', 'notes 10.txt', 'Zulu.txt', 'duplicate.txt', 'duplicate.txt', 'alpha']);
   });
 
   it('filters archive entries independently of their file kind', () => {

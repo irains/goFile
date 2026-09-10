@@ -1,4 +1,6 @@
-import { type SxProps, type Theme, createTheme } from '@mui/material/styles';
+import { type SxProps, type Theme, alpha, createTheme } from '@mui/material/styles';
+import type { AccentId } from './theme';
+import { accentPalettes } from './theme';
 import type { CSSProperties } from 'react';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -122,19 +124,20 @@ const compactTouchTarget = {
 // ──────────────────────────────────────────────────────────────────────────────
 // App theme factory.
 // ──────────────────────────────────────────────────────────────────────────────
-export function createAppTheme() {
+export function createAppTheme(accentId: AccentId = 'forest') {
+  const accent = accentPalettes[accentId];
   return createTheme({
     cssVariables: { colorSchemeSelector: 'data-mui-color-scheme' },
     defaultColorScheme: 'dark',
     colorSchemes: {
       light: {
         palette: {
-          primary: { main: '#3C6A4D', light: '#70967A', dark: '#2D533B', contrastText: '#FBF9F2' },
+          primary: accent.light,
           secondary: { main: '#286470', light: '#5C9299', dark: '#1D4C55', contrastText: '#FBF9F2' },
           background: { default: '#F3F0E7', paper: '#FBF9F2' },
           text: { primary: '#242820', secondary: '#596052', disabled: '#7A8074' },
           divider: '#D9D5C6',
-          action: { hover: 'rgba(60, 106, 77, 0.055)', selected: 'rgba(60, 106, 77, 0.11)', disabled: 'rgba(36, 40, 32, 0.12)', disabledBackground: 'rgba(36, 40, 32, 0.08)' },
+          action: { hover: alpha(accent.light.main, 0.055), selected: alpha(accent.light.main, 0.11), disabled: 'rgba(36, 40, 32, 0.12)', disabledBackground: 'rgba(36, 40, 32, 0.08)' },
           AppBar: { defaultBg: '#F3F0E7', darkBg: '#F3F0E7' },
           success: { main: '#3C6A4D', light: '#70967A', dark: '#2D533B', contrastText: '#FBF9F2' },
           warning: { main: '#9A651D', light: '#C39148', dark: '#754811', contrastText: '#242820' },
@@ -144,12 +147,12 @@ export function createAppTheme() {
       },
       dark: {
         palette: {
-          primary: { main: '#9EC6A0', light: '#C4DEC4', dark: '#729D77', contrastText: '#171D18' },
+          primary: accent.dark,
           secondary: { main: '#84C5CC', light: '#B4E0E2', dark: '#55939B', contrastText: '#171D18' },
           background: { default: '#171D18', paper: '#222A22' },
           text: { primary: '#F0F1E7', secondary: '#C1C7B9', disabled: '#899286' },
           divider: '#3B463C',
-          action: { hover: 'rgba(196, 222, 196, 0.075)', selected: 'rgba(158, 198, 160, 0.16)', disabled: 'rgba(240, 241, 231, 0.13)', disabledBackground: 'rgba(240, 241, 231, 0.08)' },
+          action: { hover: alpha(accent.dark.light, 0.075), selected: alpha(accent.dark.main, 0.16), disabled: 'rgba(240, 241, 231, 0.13)', disabledBackground: 'rgba(240, 241, 231, 0.08)' },
           AppBar: { defaultBg: '#171D18', darkBg: '#171D18' },
           success: { main: '#9EC6A0', light: '#C4DEC4', dark: '#729D77', contrastText: '#171D18' },
           warning: { main: '#E6B76E', light: '#F2D39B', dark: '#B98235', contrastText: '#171D18' },
@@ -190,7 +193,7 @@ export function createAppTheme() {
             minHeight: 40,
             borderRadius: radii.sm,
             transition: controlTransition,
-            '&:hover': { boxShadow: `0 3px 10px ${theme.palette.mode === 'light' ? 'rgba(54, 63, 45, 0.12)' : 'rgba(0, 0, 0, 0.24)'}` },
+            '&:hover': { boxShadow: `0 3px 10px ${theme.palette.mode === 'light' ? alpha(theme.palette.primary.dark, 0.18) : 'rgba(0, 0, 0, 0.24)'}` },
             '&:active': { transform: 'translateY(1px)', boxShadow: 'none' }
           }),
           sizeSmall: { minHeight: 32 },
@@ -205,7 +208,7 @@ export function createAppTheme() {
             minHeight: 40,
             borderRadius: radii.sm,
             transition: controlTransition,
-            '&:hover': { backgroundColor: 'var(--mui-palette-action-hover)', boxShadow: `0 2px 8px ${theme.palette.mode === 'light' ? 'rgba(54, 63, 45, 0.1)' : 'rgba(0, 0, 0, 0.22)'}` },
+            '&:hover': { backgroundColor: 'var(--mui-palette-action-hover)', boxShadow: `0 2px 8px ${theme.palette.mode === 'light' ? alpha(theme.palette.primary.dark, 0.15) : 'rgba(0, 0, 0, 0.22)'}` },
             '&:active': { transform: 'translateY(1px)', boxShadow: 'none' }
           }),
           sizeSmall: { minWidth: 32, minHeight: 32, ...compactTouchTarget }
@@ -242,9 +245,9 @@ export function createAppTheme() {
           })
         }
       },
-      MuiDialog: { styleOverrides: { paper: ({ theme }) => ({ backgroundImage: 'none', border: `1px solid ${theme.palette.divider}`, boxShadow: theme.palette.mode === 'light' ? '0 14px 36px rgba(54, 63, 45, 0.16)' : '0 18px 42px rgba(0, 0, 0, 0.34)' }) } },
+      MuiDialog: { styleOverrides: { paper: ({ theme }) => ({ backgroundImage: 'none', border: `1px solid ${theme.palette.divider}`, boxShadow: theme.palette.mode === 'light' ? `0 14px 36px ${alpha(theme.palette.primary.dark, 0.22)}` : '0 18px 42px rgba(0, 0, 0, 0.34)' }) } },
       MuiDrawer: { styleOverrides: { paper: ({ theme }) => ({ backgroundImage: 'none', borderLeft: `1px solid ${theme.palette.divider}` }) } },
-      MuiMenu: { styleOverrides: { paper: ({ theme }) => ({ backgroundImage: 'none', border: `1px solid ${theme.palette.divider}`, boxShadow: theme.palette.mode === 'light' ? '0 8px 20px rgba(54, 63, 45, 0.13)' : '0 10px 28px rgba(0, 0, 0, 0.3)' }) } },
+      MuiMenu: { styleOverrides: { paper: ({ theme }) => ({ backgroundImage: 'none', border: `1px solid ${theme.palette.divider}`, boxShadow: theme.palette.mode === 'light' ? `0 8px 20px ${alpha(theme.palette.primary.dark, 0.18)}` : '0 10px 28px rgba(0, 0, 0, 0.3)' }) } },
       MuiAlert: { styleOverrides: { root: { borderRadius: radii.sm } } },
       MuiLinearProgress: { styleOverrides: { root: { borderRadius: radii.sm, height: 6 } } },
       MuiCssBaseline: {

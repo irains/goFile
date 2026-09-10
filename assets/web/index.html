@@ -8,24 +8,28 @@
     <script>
       (() => {
         let mode = 'system';
-        let resolved = '';
+        let accent = 'forest';
         try {
-          const stored = localStorage.getItem('fileharbor-mode');
-          mode = (stored === 'light' || stored === 'dark' || stored === 'system') ? stored : 'system';
+          const storedMode = localStorage.getItem('fileharbor-mode');
+          const storedAccent = localStorage.getItem('fileharbor-accent');
+          mode = (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') ? storedMode : 'system';
+          accent = (storedAccent === 'forest' || storedAccent === 'harbor' || storedAccent === 'slate' || storedAccent === 'orchid' || storedAccent === 'cedar') ? storedAccent : 'forest';
         } catch (_) {}
         const mediaDark = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        resolved = mode === 'light' ? 'light' : mode === 'dark' ? 'dark' : (mediaDark ? 'dark' : 'light');
-        document.documentElement.setAttribute('data-mui-color-scheme', resolved);
+        const resolved = mode === 'light' ? 'light' : mode === 'dark' ? 'dark' : (mediaDark ? 'dark' : 'light');
+        const root = document.documentElement;
+        root.setAttribute('data-mui-color-scheme', resolved);
+        root.setAttribute('data-fileharbor-accent', accent);
       })();
     </script>
     <title>FileHarbor</title>
-    <script type="module" crossorigin src="./assets/index-B8KjxUos.js"></script>
+    <script type="module" crossorigin src="./assets/index-Dq6QE-sr.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/react-D2EREKHA.js">
     <link rel="modulepreload" crossorigin href="./assets/router-CBUVEgyz.js">
-    <link rel="modulepreload" crossorigin href="./assets/vendor-CEL5vwNY.js">
-    <link rel="modulepreload" crossorigin href="./assets/mui-DFmqxi1l.js">
-    <link rel="modulepreload" crossorigin href="./assets/query-BKnzTD7m.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-DVm82pVc.css">
+    <link rel="modulepreload" crossorigin href="./assets/vendor-C9sUiLVG.js">
+    <link rel="modulepreload" crossorigin href="./assets/mui-BHhwRMCG.js">
+    <link rel="modulepreload" crossorigin href="./assets/query-BczUEuZz.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-BqrikwNV.css">
   </head>
   <body>
     <div id="root"></div>

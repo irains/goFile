@@ -1,7 +1,7 @@
 import type { FileEntry } from '../api/client';
 
 export type ListingKindFilter = 'all' | FileEntry['kind'] | 'archive';
-export type ListingSort = 'name-asc' | 'name-desc' | 'modified-desc' | 'modified-asc' | 'size-desc' | 'size-asc';
+export type ListingSort = 'folders-first' | 'name-asc' | 'name-desc' | 'modified-desc' | 'modified-asc' | 'size-desc' | 'size-asc';
 
 export type ListingControls = {
   query: string;
@@ -19,6 +19,10 @@ function compareModified(left: FileEntry, right: FileEntry): number {
 
 function compareEntries(left: FileEntry, right: FileEntry, sort: ListingSort): number {
   switch (sort) {
+    case 'folders-first': {
+      const directoryOrder = Number(right.kind === 'directory') - Number(left.kind === 'directory');
+      return directoryOrder || nameCollator.compare(left.name, right.name);
+    }
     case 'name-desc':
       return nameCollator.compare(right.name, left.name);
     case 'modified-desc':

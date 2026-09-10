@@ -55,8 +55,9 @@ describe('workspace table layout', () => {
     expect(state.partiallySelected).toBe(false);
   });
 
-  it('preserves wrapping names while reserving only the natural modified-time width', () => {
+  it('preserves wrapping names while keeping size and modified values on one line', () => {
     expect(desktopTableColumnSx.name).toEqual({ width: '100%' });
+    expect(desktopTableColumnSx.size).toEqual({ width: '1%', whiteSpace: 'nowrap' });
     expect(desktopTableColumnSx.modified).toEqual({ width: '1%', whiteSpace: 'nowrap' });
     expect(fileNameButtonSx.overflowWrap).toBe('anywhere');
     expect(fileNameButtonSx).not.toHaveProperty('textOverflow');
