@@ -238,7 +238,6 @@ test('recycle bin moves, confirms permanent actions, restores, and fits mobile',
     name: 'sample.txt', original_path: 'sample.txt', kind: 'file', size_bytes: 6_370_000,
     deleted_at: '2026-09-11T10:54:28Z'
   };
-  let trashEntries: typeof recycled[] = [];
   const longName = 'this-is-an-intentionally-long-mobile-filename-for-line-clamp-validation.txt';
   await page.route('**/api/session', (route) => route.fulfill({ json: session }));
   await page.route(/\/api\/listing/, (route) => route.fulfill({
@@ -259,16 +258,14 @@ test('recycle bin moves, confirms permanent actions, restores, and fits mobile',
     }
   }));
   await page.route(/\/api\/trash(?:\?.*)?$/, async (route) => {
-    await route.fulfill({ json: { ok: true, entries: trashEntries } });
+    await route.fulfill({ json: { ok: true, entries: [recycled] } });
   });
   await page.route('**/do/rm', (route) => {
     inWorkspace = false;
-    trashEntries = [recycled];
     return route.fulfill({ json: { ok: true, entry: recycled } });
   });
   await page.route(/\/api\/trash\/[^/]+\/restore$/, (route) => {
     inWorkspace = true;
-    trashEntries = [];
     return route.fulfill({ json: { ok: true, path: 'sample.txt' } });
   });
 
