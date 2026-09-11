@@ -9,8 +9,8 @@
       "assets/fileharbor-logo-COXRcvQZ.svg"
     ]
   },
-  "_Workspace-BxCagFeL.js": {
-    "file": "assets/Workspace-BxCagFeL.js",
+  "_Workspace-C3CZeD0L.js": {
+    "file": "assets/Workspace-C3CZeD0L.js",
     "name": "Workspace",
     "isDynamicEntry": true,
     "imports": [
@@ -207,7 +207,7 @@
     ]
   },
   "index.html": {
-    "file": "assets/index-D0Q3xUzR.js",
+    "file": "assets/index-DKYZwEc2.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -220,7 +220,7 @@
     ],
     "dynamicImports": [
       "src/components/LoginPage.tsx",
-      "_Workspace-BxCagFeL.js"
+      "_Workspace-C3CZeD0L.js"
     ],
     "css": [
       "assets/index-gcHm37fw.css"
@@ -231,7 +231,7 @@
     "src": "src/assets/fileharbor-logo.svg"
   },
   "src/components/LoginPage.tsx": {
-    "file": "assets/LoginPage-DEJCUNtn.js",
+    "file": "assets/LoginPage-D81z3ubO.js",
     "name": "LoginPage",
     "src": "src/components/LoginPage.tsx",
     "isDynamicEntry": true,
@@ -246,14 +246,14 @@
     ]
   },
   "src/editor/EditorDialog.tsx": {
-    "file": "assets/EditorDialog-B1d2-3BA.js",
+    "file": "assets/EditorDialog-YmlGxMd8.js",
     "name": "EditorDialog",
     "src": "src/editor/EditorDialog.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
       "_react-D2EREKHA.js",
-      "_Workspace-BxCagFeL.js",
+      "_Workspace-C3CZeD0L.js",
       "_mui-DzK_oTi2.js",
       "_router-CBUVEgyz.js",
       "_query-BzCdusPr.js",

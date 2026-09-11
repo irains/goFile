@@ -297,12 +297,19 @@ export function Workspace() {
       if (result.hash) setNotice({ message: t('success.checksum', { hash: result.hash }), severity: 'success' });
       await Promise.all(variables.affectedDirectories.map(refreshDirectory));
     },
-    onError: (error) => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' })
+    onError: (error) => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' }),
+    onSettled: async (_result, _error, variables) => {
+      // The bin may already be open; failed operations can also leave recycled content.
+      if (variables.endpoint === 'do/rm') await queryClient.invalidateQueries({ queryKey: ['trash'] });
+    }
   });
   const batch = useMutation({
     mutationFn: ({ endpoint, body }: { endpoint: string; body: unknown; affectedDirectories: string[] }) => api.batch<{ ok: boolean; download_url?: string }>(endpoint, body),
     onSuccess: async (result, variables) => { if (result.download_url) window.location.assign(result.download_url); else await Promise.all(variables.affectedDirectories.map(refreshDirectory)); },
-    onError: (error) => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' })
+    onError: (error) => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' }),
+    onSettled: async (_result, _error, variables) => {
+      if (variables.endpoint === 'do/batch/delete') await queryClient.invalidateQueries({ queryKey: ['trash'] });
+    }
   });
   const propertyQuery = useQuery({ queryKey: ['properties', propertiesFor?.path], queryFn: () => api.getProperties(propertiesFor!.path), enabled: Boolean(propertiesFor) });
 

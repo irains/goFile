@@ -59,12 +59,23 @@ test.describe('Go service integration', () => {
     await page.getByRole('button', { name: 'New file' }).click();
     const newFileDialog = page.getByRole('dialog', { name: 'Create file' });
     await newFileDialog.getByLabel('File name').fill(restoredName);
+    const createResponse = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/do/newfile');
     await newFileDialog.getByRole('button', { name: 'Confirm' }).click();
+    const created = await createResponse;
+    expect(created.status()).toBe(200);
+    expect(await created.json()).toMatchObject({ ok: true });
     await expect(page.getByRole('button', { name: restoredName, exact: true })).toBeVisible();
     await page.getByRole('button', { name: `Actions ${restoredName}` }).click();
     await page.getByRole('menuitem', { name: 'Move to recycle bin' }).click();
-    await page.getByRole('dialog', { name: `Move ${restoredName} to the recycle bin?` }).getByRole('button', { name: 'Move to recycle bin' }).click();
-    await expect(page.getByRole('button', { name: restoredName, exact: true })).not.toBeVisible();
+    const confirmation = page.getByRole('dialog', { name: `Move ${restoredName} to the recycle bin?` });
+    const moveResponse = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/do/rm');
+    await confirmation.getByRole('button', { name: 'Move to recycle bin' }).click();
+    const moved = await moveResponse;
+    expect(moved.status()).toBe(200);
+    expect(await moved.json()).toMatchObject({ ok: true });
+    await expect(confirmation).toHaveCount(0);
+    // An exiting modal hides the workspace from role locators before deletion finishes.
+    await expect(page.getByRole('button', { name: restoredName, exact: true, includeHidden: true })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Recycle bin' }).click();
     await expect(recycleBin).toBeVisible();
@@ -73,7 +84,17 @@ test.describe('Go service integration', () => {
     await page.getByRole('button', { name: 'Recycle bin' }).click();
     await expect(recycleBin).toBeVisible();
     await expect(recycleBinEntry).toBeVisible();
-    await recycleBin.getByRole('button', { name: 'Restore' }).click();
-    await expect(recycleBinEntry).not.toBeVisible();
+    const recycledRow = recycleBin.getByRole('listitem').filter({ has: page.getByText(restoredName, { exact: true }) });
+    const restoreResponse = page.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/trash\/[^/]+\/restore$/.test(new URL(response.url()).pathname));
+    await recycledRow.getByRole('button', { name: 'Restore', exact: true }).click();
+    const restored = await restoreResponse;
+    expect(restored.status()).toBe(200);
+    expect(await restored.json()).toMatchObject({ ok: true, path: `service-fixture/${restoredName}` });
+    await expect(recycleBinEntry).toHaveCount(0);
+    await recycleBin.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(recycleBin).toHaveCount(0);
+    await expect(page.getByRole('button', { name: restoredName, exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('button', { name: restoredName, exact: true })).toBeVisible();
   });
 });

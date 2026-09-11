@@ -231,7 +231,8 @@ test('move destination browsing stays in one responsive dialog', async ({ page }
   expect(metrics.scrollWidth).toBe(metrics.clientWidth);
 });
 
-test('mobile workspace keeps recycle-bin confirmation and compact controls usable', async ({ page }) => {
+test('mobile workspace moves and restores files with compact recycle-bin controls', async ({ page }) => {
+  let inWorkspace = true;
   const recycled = {
     id: '0123456789abcdef0123456789abcdef',
     name: 'sample.txt', original_path: 'sample.txt', kind: 'file', size_bytes: 6_370_000,
@@ -252,14 +253,23 @@ test('mobile workspace keeps recycle-bin confirmation and compact controls usabl
           name: longName, path: longName, kind: 'file', size_bytes: 12,
           modified_at: '2026-09-05T10:54:28Z', mode: '-rw-r--r--',
           is_archive: false, previewable: true, editable: true, version: 'v2'
-        }]
+        }].filter((entry) => inWorkspace || entry.name !== 'sample.txt')
       }
     }
   }));
-  await page.route(/\/api\/trash(?:\?.*)?$/, async (route) => {
-    await route.fulfill({ json: { ok: true, entries: [recycled] } });
+  await page.route('**/do/rm', (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(new URLSearchParams(route.request().postData() ?? '').get('path')).toBe('sample.txt');
+    inWorkspace = false;
+    return route.fulfill({ json: { ok: true } });
   });
-  await page.route(/\/api\/trash\/[^/]+\/restore$/, (route) => route.fulfill({ json: { ok: true, path: 'sample.txt' } }));
+  await page.route(/\/api\/trash(?:\?.*)?$/, (route) => route.fulfill({ json: { ok: true, entries: inWorkspace ? [] : [recycled] } }));
+  await page.route(/\/api\/trash\/[^/]+\/restore$/, (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(new URL(route.request().url()).pathname).toBe(`/api/trash/${recycled.id}/restore`);
+    inWorkspace = true;
+    return route.fulfill({ json: { ok: true, path: 'sample.txt' } });
+  });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
@@ -279,6 +289,16 @@ test('mobile workspace keeps recycle-bin confirmation and compact controls usabl
   await expect(batchActions).toHaveCSS('display', 'grid');
   await sampleSelection.uncheck();
 
+  await page.getByRole('button', { name: 'Actions sample.txt', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Move to recycle bin', exact: true }).click();
+  const moveDialog = page.getByRole('dialog', { name: 'Move sample.txt to the recycle bin?' });
+  const moveResponse = page.waitForResponse('**/do/rm');
+  await moveDialog.getByRole('button', { name: 'Move to recycle bin', exact: true }).click();
+  expect((await moveResponse).status()).toBe(200);
+  await expect(moveDialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'sample.txt', exact: true, includeHidden: true })).toHaveCount(0);
+  await expect(longNameButton).toBeVisible();
+
   await page.getByRole('button', { name: 'Recycle bin' }).click();
   const recycleBin = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Recycle bin' }) });
   await expect(recycleBin).toBeVisible();
@@ -291,8 +311,16 @@ test('mobile workspace keeps recycle-bin confirmation and compact controls usabl
   await expect(permanentConfirm).toBeEnabled();
   await permanentDialog.getByRole('button', { name: 'Cancel' }).click();
 
-  await page.getByRole('button', { name: 'Restore' }).click();
-  await expect(recycleBin.getByText('sample.txt', { exact: true })).toBeVisible();
+  await expect(permanentDialog).toHaveCount(0);
+  const restoreResponse = page.waitForResponse(/\/api\/trash\/[^/]+\/restore$/);
+  await recycleBin.getByRole('button', { name: 'Restore', exact: true }).click();
+  expect((await restoreResponse).status()).toBe(200);
+  await expect(recycleBin.getByText('sample.txt', { exact: true })).toHaveCount(0);
+  await expect(recycleBin.getByText('Recycle bin is empty', { exact: true })).toBeVisible();
+  await recycleBin.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(recycleBin).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'sample.txt', exact: true })).toBeVisible();
+  await expect(longNameButton).toBeVisible();
   const metrics = await page.locator('body').evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
   expect(metrics.scrollWidth).toBe(metrics.clientWidth);
 });
