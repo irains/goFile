@@ -258,7 +258,9 @@ test('recycle bin moves, confirms permanent actions, restores, and fits mobile',
       }
     }
   }));
-  await page.route(/\/api\/trash(?:\?.*)?$/, (route) => route.fulfill({ json: { ok: true, entries: trashEntries } }));
+  await page.route(/\/api\/trash(?:\?.*)?$/, async (route) => {
+    await route.fulfill({ json: { ok: true, entries: trashEntries } });
+  });
   await page.route('**/do/rm', (route) => {
     inWorkspace = false;
     trashEntries = [recycled];

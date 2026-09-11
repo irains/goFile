@@ -52,10 +52,10 @@ export function RecycleBinPanel({
     setNextCursor(undefined);
   }, [open]);
   useEffect(() => {
-    if (!trashQuery.data) return;
+    if (!open || !trashQuery.data) return;
     setEntries((previous) => cursor ? [...previous, ...trashQuery.data.entries] : trashQuery.data.entries);
     setNextCursor(trashQuery.data.nextCursor);
-  }, [cursor, trashQuery.data]);
+  }, [cursor, open, trashQuery.data]);
   useEffect(() => {
     setConfirmation('');
   }, [pendingPurge]);
@@ -83,6 +83,8 @@ export function RecycleBinPanel({
     onError: (error) => onNotice(error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), 'error')
   });
 
+  const displayedEntries = cursor ? entries : trashQuery.data?.entries ?? entries;
+  const displayedNextCursor = cursor ? nextCursor : trashQuery.data?.nextCursor ?? nextCursor;
   const isPurging = purge.isPending || empty.isPending;
   const confirmPurge = () => {
     if (confirmation !== 'DELETE' || !pendingPurge) return;
@@ -96,14 +98,14 @@ export function RecycleBinPanel({
       onClose={onClose}
       icon={<DeleteOutline />}
       title={t('recycleBin.title')}
-      trailing={mutable && entries.length > 0 ? <Button size="small" color="error" onClick={() => setPendingPurge({ type: 'empty' })}>{t('action.emptyRecycleBin')}</Button> : undefined}
+      trailing={mutable && displayedEntries.length > 0 ? <Button size="small" color="error" onClick={() => setPendingPurge({ type: 'empty' })}>{t('action.emptyRecycleBin')}</Button> : undefined}
     >
       <Stack spacing={2}>
-        {trashQuery.isLoading && entries.length === 0 ? <Typography color="text.secondary">{t('recycleBin.loading')}</Typography> : null}
-        {trashQuery.isError && entries.length === 0 ? <Alert severity="error">{trashQuery.error instanceof ApiError ? t(`error.${trashQuery.error.code}`) : t('error.generic')}</Alert> : null}
-        {!trashQuery.isLoading && !trashQuery.isError && entries.length === 0 ? <EmptyState icon={<DeleteOutline />} title={t('recycleBin.emptyTitle')} caption={t('recycleBin.emptyHint')} /> : null}
-        {entries.length > 0 ? <List disablePadding aria-label={t('recycleBin.title')}>
-          {entries.map((entry, index) => <Box key={entry.id}>
+        {trashQuery.isLoading && displayedEntries.length === 0 ? <Typography color="text.secondary">{t('recycleBin.loading')}</Typography> : null}
+        {trashQuery.isError && displayedEntries.length === 0 ? <Alert severity="error">{trashQuery.error instanceof ApiError ? t(`error.${trashQuery.error.code}`) : t('error.generic')}</Alert> : null}
+        {!trashQuery.isLoading && !trashQuery.isError && displayedEntries.length === 0 ? <EmptyState icon={<DeleteOutline />} title={t('recycleBin.emptyTitle')} caption={t('recycleBin.emptyHint')} /> : null}
+        {displayedEntries.length > 0 ? <List disablePadding aria-label={t('recycleBin.title')}>
+          {displayedEntries.map((entry, index) => <Box key={entry.id}>
             {index > 0 ? <Divider component="li" /> : null}
             <ListItem alignItems="flex-start" disableGutters secondaryAction={mutable ? <Stack direction="row" spacing={0.25}>
               <Button size="small" startIcon={<RestoreOutlined />} disabled={restore.isPending} onClick={() => restore.mutate(entry)}>{t('action.restore')}</Button>
@@ -120,7 +122,7 @@ export function RecycleBinPanel({
             </ListItem>
           </Box>)}
         </List> : null}
-        {nextCursor ? <Button variant="outlined" disabled={trashQuery.isFetching} onClick={() => setCursor(nextCursor)}>{t('action.loadMore')}</Button> : null}
+        {displayedNextCursor ? <Button variant="outlined" disabled={trashQuery.isFetching} onClick={() => setCursor(displayedNextCursor)}>{t('action.loadMore')}</Button> : null}
       </Stack>
     </SidePanel>
     <DialogShell
