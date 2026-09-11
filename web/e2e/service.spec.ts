@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const username = process.env.FILEHARBOR_E2E_USERNAME;
 const password = process.env.FILEHARBOR_E2E_PASSWORD;
@@ -7,6 +7,50 @@ const hasServiceConfiguration = Boolean(process.env.PLAYWRIGHT_BASE_URL && usern
 // Service login submits a CI-only password. Never retain Playwright media because it
 // could reproduce the interaction or serialize request data.
 test.use({ trace: 'off', video: 'off', screenshot: 'off' });
+
+// Keep diagnostics deliberately narrow: never log headers, cookies, login bodies,
+// page HTML, or arbitrary browser errors from this authenticated service test.
+async function expectRecycledFile(page: Page, panel: Locator, name: string, id: string) {
+  let responseStatus: number | undefined;
+  let entryCount: number | undefined;
+  let matchingEntry = false;
+  try {
+    const responsePromise = page.waitForResponse((response) => response.request().method() === 'GET'
+      && new URL(response.url()).pathname === '/api/trash');
+    await page.getByRole('button', { name: 'Recycle bin', exact: true }).click();
+    await expect(panel).toBeVisible();
+    const response = await responsePromise;
+    responseStatus = response.status();
+    expect(responseStatus, 'GET /api/trash must succeed').toBe(200);
+    const body = await response.json();
+    expect(body.ok, 'GET /api/trash must return ok: true').toBe(true);
+    expect(Array.isArray(body.entries), 'GET /api/trash must return an entries array').toBe(true);
+    const entries = body.entries as Array<{ id: string; name: string; original_path: string }>;
+    entryCount = entries.length;
+    matchingEntry = entries.some((entry) => entry.id === id && entry.name === name
+      && entry.original_path === `service-fixture/${name}`);
+    expect(matchingEntry, 'GET /api/trash must contain the exact record returned by POST /do/rm').toBe(true);
+    await expect(panel.getByText(name, { exact: true })).toBeVisible();
+  } catch (error) {
+    const dom = await page.evaluate((fileName) => {
+      const drawers = Array.from(document.querySelectorAll('.MuiDrawer-root'));
+      const fileText = Array.from(document.querySelectorAll('.MuiDrawer-root *'))
+        .find((element) => element.childElementCount === 0 && element.textContent === fileName);
+      return {
+        drawerCount: drawers.length,
+        hiddenDrawerCount: drawers.filter((element) => element.getAttribute('aria-hidden') === 'true').length,
+        dialogCount: document.querySelectorAll('[role="dialog"]').length,
+        fileTextPresent: Boolean(fileText),
+        fileTextHiddenByAncestor: Boolean(fileText?.closest('[aria-hidden="true"]')),
+        fileTextHasBounds: Boolean(fileText?.getClientRects().length)
+      };
+    }, name).catch(() => ({ unavailable: true }));
+    const diagnostic = JSON.stringify({ responseStatus, entryCount, matchingEntry, dom });
+    console.error('Recycle-bin service diagnostic:', diagnostic);
+    if (process.env.GITHUB_ACTIONS === 'true') console.error(`::error title=Recycle-bin service diagnostic::${diagnostic}`);
+    throw error;
+  }
+}
 
 test.describe('Go service integration', () => {
   test.skip(!hasServiceConfiguration, 'requires PLAYWRIGHT_BASE_URL and ephemeral service test credentials');
@@ -72,18 +116,21 @@ test.describe('Go service integration', () => {
     await confirmation.getByRole('button', { name: 'Move to recycle bin' }).click();
     const moved = await moveResponse;
     expect(moved.status()).toBe(200);
-    expect(await moved.json()).toMatchObject({ ok: true });
+    const moveBody = await moved.json();
+    expect(moveBody).toMatchObject({ ok: true, entry: { name: restoredName, original_path: `service-fixture/${restoredName}`, kind: 'file' } });
+    expect(moveBody.entry.id).toMatch(/^[0-9a-f]{32}$/);
+    const recycledID: string = moveBody.entry.id;
     await expect(confirmation).toHaveCount(0);
     // An exiting modal hides the workspace from role locators before deletion finishes.
     await expect(page.getByRole('button', { name: restoredName, exact: true, includeHidden: true })).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Recycle bin' }).click();
-    await expect(recycleBin).toBeVisible();
-    await expect(recycleBinEntry).toBeVisible();
+    await test.step('list the moved record in the open recycle bin', async () => {
+      await expectRecycledFile(page, recycleBin, restoredName, recycledID);
+    });
     await page.reload();
-    await page.getByRole('button', { name: 'Recycle bin' }).click();
-    await expect(recycleBin).toBeVisible();
-    await expect(recycleBinEntry).toBeVisible();
+    await test.step('list the same persisted record after reload', async () => {
+      await expectRecycledFile(page, recycleBin, restoredName, recycledID);
+    });
     const recycledRow = recycleBin.getByRole('listitem').filter({ has: page.getByText(restoredName, { exact: true }) });
     const restoreResponse = page.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/trash\/[^/]+\/restore$/.test(new URL(response.url()).pathname));
     await recycledRow.getByRole('button', { name: 'Restore', exact: true }).click();
