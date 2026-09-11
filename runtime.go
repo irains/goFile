@@ -19,6 +19,7 @@ const (
 	stateChunksDirectory  = "chunks"
 	stateTempDirectory    = "tmp"
 	stateUploadsDirectory = "uploads"
+	stateTrashDirectory   = "trash"
 	stateAuditFile        = "audit.jsonl"
 	stateLockFile         = "state.lock"
 
@@ -250,6 +251,7 @@ type RuntimeState struct {
 	ChunksDir  string
 	TempDir    string
 	UploadsDir string
+	TrashDir   string
 	Audit      *AuditLog
 	lock       *stateLock
 
@@ -320,6 +322,10 @@ func OpenRuntimeState(configuredDir, managedRoot string) (*RuntimeState, error) 
 	if err := ensurePrivateDirectory(uploadsDir); err != nil {
 		return nil, err
 	}
+	trashDir := filepath.Join(statePath, stateTrashDirectory)
+	if err := ensurePrivateDirectory(trashDir); err != nil {
+		return nil, err
+	}
 	if err := clearStateDirectory(chunksDir); err != nil {
 		return nil, err
 	}
@@ -330,7 +336,7 @@ func OpenRuntimeState(configuredDir, managedRoot string) (*RuntimeState, error) 
 	if err != nil {
 		return nil, err
 	}
-	state := &RuntimeState{Dir: statePath, ChunksDir: chunksDir, TempDir: tempDir, UploadsDir: uploadsDir, Audit: audit, lock: lock}
+	state := &RuntimeState{Dir: statePath, ChunksDir: chunksDir, TempDir: tempDir, UploadsDir: uploadsDir, TrashDir: trashDir, Audit: audit, lock: lock}
 	closeLock = false
 	return state, nil
 }

@@ -28,6 +28,31 @@ describe('API client', () => {
     await expect(api.getListing('docs')).resolves.toMatchObject({ path: 'docs', parentPath: '', listingToken: 'token', entries: [{ sizeBytes: 3, previewable: true, editable: true }] });
   });
 
+  it('normalizes recycle-bin entries and sends CSRF-protected permanent confirmations', async () => {
+    setCSRFToken('csrf-value');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, entries: [{ id: '0123456789abcdef0123456789abcdef', name: 'notes.txt', original_path: 'docs/notes.txt', kind: 'file', size_bytes: 3, deleted_at: '2026-09-11T12:00:00Z' }], next_cursor: 'fedcba9876543210fedcba9876543210' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, affected: 1 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.getTrash()).resolves.toEqual({
+      entries: [{ id: '0123456789abcdef0123456789abcdef', name: 'notes.txt', originalPath: 'docs/notes.txt', kind: 'file', sizeBytes: 3, deletedAt: '2026-09-11T12:00:00Z' }],
+      nextCursor: 'fedcba9876543210fedcba9876543210'
+    });
+    await api.purgeTrash('0123456789abcdef0123456789abcdef', 'DELETE');
+    await api.emptyTrash('DELETE');
+
+    const [purgePath, purgeInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(purgePath).toContain('api/trash/0123456789abcdef0123456789abcdef/purge');
+    expect((purgeInit.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-value');
+    expect(purgeInit.body).toBe(JSON.stringify({ confirmation: 'DELETE' }));
+    const [emptyPath, emptyInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(emptyPath).toContain('api/trash/empty');
+    expect((emptyInit.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-value');
+    expect(emptyInit.body).toBe(JSON.stringify({ confirmation: 'DELETE' }));
+  });
+
   it('uses stable server error codes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, code: 'csrf_invalid' }), { status: 403 })));
     await expect(api.getProperties('secret')).rejects.toEqual(expect.objectContaining({ status: 403, code: 'csrf_invalid' }));

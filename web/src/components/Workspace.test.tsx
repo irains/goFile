@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { I18nProvider } from '../i18n';
 import type { FileEntry } from '../api/client';
-import { EntryMenu, decodeRouteSplat, desktopTableColumnSx, directoryPathForEditor, entryKindLabel, fileNameButtonSx } from './Workspace';
+import { EntryMenu, decodeRouteSplat, desktopTableColumnSx, directoryPathForEditor, entryKindLabel, fileNameButtonSx, mobileFileNameSx } from './Workspace';
 import { listingSelectionState } from './workspaceListing';
 import { entryMenuActions } from './entryActions';
 
@@ -55,6 +55,14 @@ describe('workspace table layout', () => {
     expect(state.partiallySelected).toBe(false);
   });
 
+  it('uses a two-line clamp for names in the dedicated mobile list', () => {
+    expect(mobileFileNameSx.display).toBe('-webkit-box');
+    expect(mobileFileNameSx.WebkitBoxOrient).toBe('vertical');
+    expect(mobileFileNameSx.WebkitLineClamp).toBe(2);
+    expect(mobileFileNameSx.overflow).toBe('hidden');
+    expect(mobileFileNameSx.overflowWrap).toBe('anywhere');
+  });
+
   it('preserves wrapping names while keeping size and modified values on one line', () => {
     expect(desktopTableColumnSx.name).toEqual({ width: '100%' });
     expect(desktopTableColumnSx.size).toEqual({ width: '1%', whiteSpace: 'nowrap' });
@@ -74,8 +82,8 @@ describe('entry menu actions', () => {
     expect(entryMenuActions({ ...file, editable: false }, true, true).map(({ name }) => name)).not.toContain('edit');
   });
 
-  it('marks Delete as the only destructive action', () => {
-    expect(entryMenuActions(file, true, true).find(({ name }) => name === 'delete')?.destructive).toBe(true);
+  it('offers moving to the recycle bin as a regular workspace action', () => {
+    expect(entryMenuActions(file, true, true).find(({ name }) => name === 'trash')?.destructive).toBeUndefined();
   });
 });
 
@@ -87,6 +95,6 @@ describe('entry menu rendering', () => {
     const items = screen.getAllByRole('menuitem');
     expect(items).toHaveLength(9);
     expect(items.every((item) => item.querySelector('svg'))).toBe(true);
-    expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveClass('MuiMenuItem-root');
+    expect(screen.getByRole('menuitem', { name: 'Move to recycle bin' })).toHaveClass('MuiMenuItem-root');
   });
 });

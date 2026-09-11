@@ -35,7 +35,7 @@ func TestOpenRuntimeStateCreatesPrivateLayoutAndClearsStaleData(t *testing.T) {
 	if state.Ready() {
 		t.Fatal("state should not become ready before the server starts")
 	}
-	for _, path := range []string{state.ChunksDir, state.TempDir, filepath.Join(state.Dir, stateAuditFile)} {
+	for _, path := range []string{state.ChunksDir, state.TempDir, state.UploadsDir, state.TrashDir, filepath.Join(state.Dir, stateAuditFile)} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("required state path %q: %v", path, err)
 		}

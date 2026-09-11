@@ -13,6 +13,7 @@ fileharbor.env
 gofile.env
 
 # React/Vite dependencies and local caches (assets/web is committed generated output).
+node_modules/
 web/node_modules/
 web/dist/
 web/.vite/

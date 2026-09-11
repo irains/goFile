@@ -25,7 +25,7 @@ export type EntryActionName =
   | 'archive'
   | 'extract'
   | 'checksum'
-  | 'delete';
+  | 'trash';
 
 export type EntryAction = {
   name: EntryActionName;
@@ -45,7 +45,7 @@ export const entryActions: EntryAction[] = [
   { name: 'archive', icon: FolderZipOutlined, visible: (entry) => entry.kind === 'directory' },
   { name: 'extract', icon: UnarchiveOutlined, visible: (entry) => entry.isArchive },
   { name: 'checksum', icon: Fingerprint, visible: (entry) => entry.kind === 'file' },
-  { name: 'delete', icon: DeleteOutline, visible: () => true, destructive: true }
+  { name: 'trash', icon: DeleteOutline, visible: () => true }
 ];
 
 export function entryMenuActions(entry: FileEntry, mutable: boolean, editorAvailable: boolean) {

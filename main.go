@@ -349,6 +349,8 @@ func operationStatus(err error) int {
 	switch utils.ErrorCode(err) {
 	case "destination_exists", "source_changed", "self_descendant", "destination_same_directory", "cross_device_move":
 		return http.StatusConflict
+	case "confirmation_required":
+		return http.StatusBadRequest
 	case "not_found", "not_directory":
 		return http.StatusNotFound
 	case "batch_limit_exceeded", "archive_limit_exceeded":
@@ -506,6 +508,34 @@ func decodeBatch(c *gin.Context, manager *auth.Manager) (utils.Selection, batchR
 	return selection, request, err
 }
 
+func decodeTrashConfirmation(c *gin.Context) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<10)
+	var request struct {
+		Confirmation string `json:"confirmation"`
+	}
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return utils.ErrInvalidPath
+	}
+	var trailing struct{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return utils.ErrInvalidPath
+	}
+	if request.Confirmation != "DELETE" {
+		return utils.ErrInvalidConfirmation
+	}
+	return nil
+}
+
+func trashAuditPath(bin *RecycleBin, id string) string {
+	record, err := bin.loadRecord(id)
+	if err != nil {
+		return ""
+	}
+	return record.metadata.OriginalPath
+}
+
 func extractArchiveHandler(state *RuntimeState) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rawPath := c.PostForm("path")
@@ -536,6 +566,10 @@ func extractArchiveHandler(state *RuntimeState) gin.HandlerFunc {
 func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 	if state == nil {
 		panic("runtime state is required")
+	}
+	trash, err := newRecycleBin(state)
+	if err != nil {
+		panic(err)
 	}
 	bundle, err := loadWebAssets()
 	if err != nil {
@@ -740,6 +774,20 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "properties": properties})
 	})
+	protected.GET("/api/trash", func(c *gin.Context) {
+		if authInfo(c).Bearer {
+			setPrivateResponse(c)
+			c.JSON(http.StatusForbidden, gin.H{"ok": false, "code": "browser_session_required"})
+			return
+		}
+		setPrivateResponse(c)
+		page, err := trash.List(c.Query("cursor"))
+		if err != nil {
+			jsonError(c, operationStatus(err), err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "entries": page.Entries, "next_cursor": page.NextCursor})
+	})
 	if uploads == nil || uploads.state != state {
 		store, err := NewUploadStore(state, defaultUploadConfig())
 		if err != nil {
@@ -748,6 +796,76 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 		uploads = store
 	}
 	registerUploadRoutes(protected, manager, state, uploads)
+
+	if !reader {
+		trashMutations := protected.Group("/")
+		trashMutations.Use(csrfRequired(manager), mutationAuditMiddleware(state))
+		trashMutations.POST("/api/trash/:id/restore", func(c *gin.Context) {
+			id := c.Param("id")
+			auditPath := trashAuditPath(trash, id)
+			if !requireAudit(c, state, "trash.restore", auditPath, 1) {
+				return
+			}
+			path, err := trash.Restore(id)
+			if err != nil {
+				if utils.ErrorCode(err) == "execution_partial" {
+					if auditErr := recordAction(state, c, "trash.restore", "partial_failure", path, utils.ErrorCode(err), 1); auditErr != nil {
+						setPrivateResponse(c)
+						c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "audit_unavailable"})
+						return
+					}
+				}
+				jsonError(c, operationStatus(err), err)
+				return
+			}
+			if !finishMutation(c, state, "trash.restore", path, 1) {
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true, "path": path})
+		})
+		trashMutations.POST("/api/trash/:id/purge", func(c *gin.Context) {
+			id := c.Param("id")
+			auditPath := trashAuditPath(trash, id)
+			if !requireAudit(c, state, "trash.purge", auditPath, 1) {
+				return
+			}
+			if err := decodeTrashConfirmation(c); err != nil {
+				jsonError(c, operationStatus(err), err)
+				return
+			}
+			if err := trash.Purge(id); err != nil {
+				jsonError(c, operationStatus(err), err)
+				return
+			}
+			if !finishMutation(c, state, "trash.purge", auditPath, 1) {
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+		trashMutations.POST("/api/trash/empty", func(c *gin.Context) {
+			if !requireAudit(c, state, "trash.empty", "", 0) {
+				return
+			}
+			if err := decodeTrashConfirmation(c); err != nil {
+				jsonError(c, operationStatus(err), err)
+				return
+			}
+			affected, results, err := trash.Empty()
+			if err != nil {
+				if err := recordAction(state, c, "trash.empty", "partial_failure", "", utils.ErrorCode(err), affected); err != nil {
+					setPrivateResponse(c)
+					c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "audit_unavailable"})
+					return
+				}
+				c.JSON(operationStatus(err), gin.H{"ok": false, "code": utils.ErrorCode(err), "items": results})
+				return
+			}
+			if !finishMutation(c, state, "trash.empty", "", affected) {
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true, "affected": affected, "items": results})
+		})
+	}
 
 	if !reader || uploader {
 		uploadGroup := protected.Group("/")
@@ -1076,31 +1194,25 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 			c.JSON(http.StatusOK, gin.H{"ok": true, "path": rel})
 		})
 		mutations.POST("/do/rm", func(c *gin.Context) {
-			if !requireAudit(c, state, "file.delete", "", 1) {
+			if !requireAudit(c, state, "file.trash", "", 1) {
 				return
 			}
-			absolute, rel, info, err := utils.ResolveExisting(c.PostForm("path"), false)
+			entry, err := trash.Move(c.PostForm("path"))
 			if err != nil {
+				if utils.ErrorCode(err) == "execution_partial" {
+					if auditErr := recordAction(state, c, "file.trash", "partial_failure", entry.OriginalPath, utils.ErrorCode(err), 1); auditErr != nil {
+						setPrivateResponse(c)
+						c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "audit_unavailable"})
+						return
+					}
+				}
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
-				jsonError(c, http.StatusBadRequest, utils.ErrUnsupportedType)
+			if !finishMutation(c, state, "file.trash", entry.OriginalPath, 1) {
 				return
 			}
-			if info.IsDir() {
-				if err := os.RemoveAll(absolute); err != nil {
-					jsonError(c, http.StatusInternalServerError, errors.New("io"))
-					return
-				}
-			} else if err := os.Remove(absolute); err != nil {
-				jsonError(c, http.StatusInternalServerError, errors.New("io"))
-				return
-			}
-			if !finishMutation(c, state, "file.delete", rel, 1) {
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"ok": true})
+			c.JSON(http.StatusOK, gin.H{"ok": true, "entry": entry})
 		})
 		mutations.POST("/do/zip", func(c *gin.Context) {
 			if !requireAudit(c, state, "archive.create", "", 1) {
@@ -1213,32 +1325,45 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 				jsonError(c, operationStatus(err), err)
 				return
 			}
-			if !requireAudit(c, state, "batch.delete", "", len(selection.Items)) {
+			if !requireAudit(c, state, "batch.trash", "", len(selection.Items)) {
 				return
 			}
-			results := utils.BatchDelete(selection)
-			allDeleted := true
-			deleted := 0
+			results := trash.BatchMove(selection)
+			allTrashed := true
+			partial := false
+			trashed := 0
 			for _, result := range results {
-				if result.Code != "deleted" {
-					allDeleted = false
-				} else {
-					deleted++
+				if result.Code == "trashed" {
+					trashed++
+					continue
+				}
+				allTrashed = false
+				if result.Code == "execution_partial" {
+					partial = true
+					trashed++
 				}
 			}
-			if !allDeleted {
-				if err := recordAction(state, c, "batch.delete", "partial_failure", "", "delete_partial", deleted); err != nil {
+			if !allTrashed {
+				code := "trash_partial"
+				if partial {
+					code = "execution_partial"
+				}
+				if err := recordAction(state, c, "batch.trash", "partial_failure", "", code, trashed); err != nil {
 					setPrivateResponse(c)
 					c.JSON(http.StatusServiceUnavailable, gin.H{"ok": false, "code": "audit_unavailable"})
 					return
 				}
-				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "code": "delete_partial", "items": results})
+				responseStatus := http.StatusInternalServerError
+				if partial {
+					responseStatus = operationStatus(utils.ErrExecutionPartial)
+				}
+				c.JSON(responseStatus, gin.H{"ok": false, "code": code, "items": results})
 				return
 			}
-			if !finishMutation(c, state, "batch.delete", "", len(results)) {
+			if !finishMutation(c, state, "batch.trash", "", trashed) {
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"ok": true, "affected": len(results), "items": results})
+			c.JSON(http.StatusOK, gin.H{"ok": true, "affected": trashed, "items": results})
 		})
 	}
 

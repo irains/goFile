@@ -13,6 +13,15 @@ import (
 
 var operationMu sync.Mutex
 
+// WithOperationLock serializes filesystem mutations that share managed sources.
+// Callers must keep the callback small and must not invoke another exported
+// operation helper that acquires this lock itself.
+func WithOperationLock(operation func() error) error {
+	operationMu.Lock()
+	defer operationMu.Unlock()
+	return operation()
+}
+
 // ItemRequest is a direct-child item identified by a short-lived listing token.
 type ItemRequest struct {
 	Name    string `json:"name"`
@@ -125,6 +134,10 @@ func validateDestination(selection Selection, destination string) ([]string, []s
 // revalidateSelection refreshes every source while an operation lock is held. A
 // listing token is only an authorization envelope: its entries must still be the
 // same direct children when an irreversible operation begins.
+func RevalidateSelection(selection Selection) (Selection, error) {
+	return revalidateSelection(selection)
+}
+
 func revalidateSelection(selection Selection) (Selection, error) {
 	if len(selection.Items) == 0 || len(selection.Items) > MaxListEntries {
 		return Selection{}, operationError("invalid_selection")
@@ -499,6 +512,18 @@ func ensureSameVolume(selection Selection, destination string) error {
 		return operationError("cross_device_move")
 	}
 	return nil
+}
+
+// IsCrossDeviceError reports whether a native rename failed because its source
+// and target are on different filesystem volumes.
+func IsCrossDeviceError(err error) bool {
+	return isCrossDeviceError(err)
+}
+
+// RenameNoReplace publishes a source at an absent destination without allowing
+// a concurrent destination to be replaced. Unsupported platforms fail closed.
+func RenameNoReplace(source, destination string) error {
+	return renameNoReplace(source, destination)
 }
 
 func copyEntry(source, target string, info os.FileInfo) error {

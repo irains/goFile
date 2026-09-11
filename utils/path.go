@@ -19,12 +19,14 @@ const (
 	InternalUploadStagePrefix    = ".fileharbor-upload-"
 	InternalArchiveZipPrefix     = ".fileharbor-zip-"
 	InternalArchiveExtractPrefix = ".fileharbor-extract-"
+	InternalTrashRestorePrefix   = ".fileharbor-restore-"
 )
 
 var internalReservedPrefixes = []string{
 	InternalUploadStagePrefix,
 	InternalArchiveZipPrefix,
 	InternalArchiveExtractPrefix,
+	InternalTrashRestorePrefix,
 }
 
 var (
@@ -44,6 +46,9 @@ var (
 	ErrEncryptedArchive     = &OperationError{Code: "encrypted_archive"}
 	ErrArchiveUnsafeEntry   = &OperationError{Code: "archive_unsafe_entry"}
 	ErrArchiveLimitExceeded = &OperationError{Code: "archive_limit_exceeded"}
+	ErrInvalidConfirmation  = &OperationError{Code: "confirmation_required"}
+	ErrTrashRecord          = &OperationError{Code: "trash_record_invalid"}
+	ErrExecutionPartial     = &OperationError{Code: "execution_partial"}
 )
 
 // OperationError intentionally carries a stable public code only. Handlers must

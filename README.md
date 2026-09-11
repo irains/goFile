@@ -111,6 +111,12 @@ fileharbor -path /srv/fileharbor/data -state-dir /var/lib/fileharbor
 
 归档相关稳定错误码为：`unsupported_archive`、`corrupt_archive`、`encrypted_archive`、`archive_unsafe_entry`（HTTP 400），`archive_limit_exceeded`（HTTP 413），以及 `destination_exists`、`source_changed`（HTTP 409）。响应不会包含 decoder 原始错误或服务器内部路径。
 
+## 回收站
+
+工作区的“移入回收站”会将文件或目录从受管目录移至 `-state-dir` 下的私有持久化回收站，而不是立即永久删除。回收站不会作为工作区目录暴露，记录使用随机 ID，服务重启后仍会保留。回收内容仅可恢复到其原始路径，若原路径已经存在同名项则返回 `destination_exists`，不会覆盖数据。
+
+回收站仅支持浏览器会话，上传 Bearer token 不可访问。浏览器会通过 `GET /api/trash` 列出项目；恢复使用 `POST /api/trash/:id/restore`；永久删除单项及清空回收站分别使用 `POST /api/trash/:id/purge` 和 `POST /api/trash/empty`。后三类变更均需要 CSRF 保护，永久删除和清空还必须提交精确的 JSON 值 `{ "confirmation": "DELETE" }`。服务会拒绝符号链接、特殊文件或不完整记录，并且不会自动过期、清理或删除合法的回收站记录。
+
 ## 可靠可恢复上传 API
 
 内置网页使用 v1 `api/uploads` 协议：可同时排队多个文件，基于真实分片传输显示进度，并提供暂停、恢复、重试与取消。网页会将 upload ID、capability、目标、文件元数据和完整 SHA-256 保存到当前浏览器的 IndexedDB，**从不保存文件内容、`File`、`Blob`、base64 或分片字节**。页面刷新、浏览器重启或重新登录后，浏览器必须重新选择原文件，并完整计算 SHA-256 后才能继续上传；选择的文件不匹配时，不会向已有传输写入任何内容。

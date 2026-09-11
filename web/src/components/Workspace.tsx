@@ -1,10 +1,10 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Add,
   Archive,
   ContentCopy,
   CreateNewFolder,
-  Delete,
+  DeleteOutline,
   DescriptionOutlined,
   DownloadOutlined,
   Folder,
@@ -61,6 +61,7 @@ import { SidePanel } from './SidePanel';
 import { EmptyState } from './EmptyState';
 import { UploadQueueDrawer } from './UploadQueueDrawer';
 import { SettingsPanel } from './SettingsPanel';
+import { RecycleBinPanel } from './RecycleBinPanel';
 import { entryMenuActions, hoverActionNames, type EntryAction, type EntryActionName } from './entryActions';
 import { formatBytes } from '../formatBytes';
 import { FolderDestinationPicker } from './FolderDestinationPicker';
@@ -88,6 +89,13 @@ export const fileNameButtonSx = {
   font: 'inherit',
   overflowWrap: 'anywhere'
 } as const;
+export const mobileFileNameSx = {
+  ...fileNameButtonSx,
+  display: '-webkit-box',
+  overflow: 'hidden',
+  WebkitBoxOrient: 'vertical',
+  WebkitLineClamp: 2
+} as const;
 
 export function decodeRouteSplat(splat: string | undefined): string {
   return (splat ?? '').split('/').filter(Boolean).join('/');
@@ -101,9 +109,9 @@ export function directoryPathForEditor(editorPath: string | null, directoryPath 
   return directoryPath;
 }
 
-function RowActions({ entry, mutable, editorAvailable, onAction, onMenu }: { entry: FileEntry; mutable: boolean; editorAvailable: boolean; onAction: (name: EntryActionName) => void; onMenu: (event: React.MouseEvent<HTMLElement>) => void }) {
+function RowActions({ entry, mutable, editorAvailable, compact = false, onAction, onMenu }: { entry: FileEntry; mutable: boolean; editorAvailable: boolean; compact?: boolean; onAction: (name: EntryActionName) => void; onMenu: (event: React.MouseEvent<HTMLElement>) => void }) {
   const { t } = useI18n();
-  const visible = hoverActionNames.filter((name) => entryMenuActions(entry, mutable, editorAvailable).some((action) => action.name === name));
+  const visible = compact ? [] : hoverActionNames.filter((name) => entryMenuActions(entry, mutable, editorAvailable).some((action) => action.name === name));
   return (
     <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
       {visible.map((name) => {
@@ -123,6 +131,85 @@ function RowActions({ entry, mutable, editorAvailable, onAction, onMenu }: { ent
         </IconButton>
       </Tooltip>
     </Stack>
+  );
+}
+
+function MobileFileList({
+  entries,
+  selected,
+  selectionState,
+  mutable,
+  editorAvailable,
+  onSelect,
+  onSelectAll,
+  onAction,
+  onMenu,
+  emptyState,
+  busy = false
+}: {
+  entries: FileEntry[];
+  selected: ReadonlySet<string>;
+  selectionState: ReturnType<typeof listingSelectionState>;
+  mutable: boolean;
+  editorAvailable: boolean;
+  onSelect: (entry: FileEntry, checked: boolean) => void;
+  onSelectAll: (checked: boolean) => void;
+  onAction: (name: EntryActionName, entry: FileEntry) => void;
+  onMenu: (entry: FileEntry, anchor: HTMLElement) => void;
+  emptyState?: ReactNode;
+  busy?: boolean;
+}) {
+  const { t } = useI18n();
+  return (
+    <Paper aria-busy={busy || undefined} sx={{ ...surface, overflow: 'hidden' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1.5, py: 0.75, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Checkbox
+          size="small"
+          aria-label={t('workspace.selectAll')}
+          checked={selectionState.allSelected}
+          indeterminate={selectionState.partiallySelected}
+          onChange={(event) => onSelectAll(event.target.checked)}
+        />
+        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('workspace.name')}</Typography>
+      </Box>
+      <Box aria-label={t('app.workspace')}>
+        {entries.map((entry, index) => (
+          <Box key={entry.path} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75, px: 1.5, py: 1.25, borderTop: index ? '1px solid' : undefined, borderColor: 'divider', bgcolor: selected.has(entry.path) ? 'action.selected' : undefined }}>
+            <Checkbox size="small" sx={{ mt: -0.5, ml: -0.75 }} aria-label={t('workspace.selectItem', { name: entry.name })} checked={selected.has(entry.path)} onChange={(event) => onSelect(entry, event.target.checked)} />
+            <ListItemIcon sx={{ minWidth: 28, mt: 0.1, color: entry.kind === 'directory' ? 'primary.light' : 'text.secondary' }}>
+              {entry.kind === 'directory' ? <Folder fontSize="small" /> : <DescriptionOutlined fontSize="small" />}
+            </ListItemIcon>
+            <Box sx={{ minWidth: 0, flex: 1, pt: 0.05 }}>
+              <Typography
+                component={entry.kind === 'directory' ? Link : 'button'}
+                to={entry.kind === 'directory' ? directoryRoute(entry.path) : undefined}
+                type={entry.kind === 'directory' ? undefined : 'button'}
+                onClick={entry.kind === 'file' ? () => window.location.assign(itemUrl('download', entry.path)) : undefined}
+                color="inherit"
+                fontWeight={entry.kind === 'directory' ? 700 : 500}
+                title={entry.name}
+                aria-label={entry.name}
+                sx={mobileFileNameSx}
+              >
+                {entry.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.35, overflowWrap: 'anywhere' }}>
+                {entry.kind === 'file' ? formatBytes(entry.sizeBytes) : entryKindLabel(entry.kind, t)} · {fmtDate(entry.modifiedAt)}
+              </Typography>
+            </Box>
+            <RowActions
+              compact
+              entry={entry}
+              mutable={mutable}
+              editorAvailable={editorAvailable}
+              onAction={(name) => onAction(name, entry)}
+              onMenu={(event) => onMenu(entry, event.currentTarget)}
+            />
+          </Box>
+        ))}
+      </Box>
+      {!entries.length ? emptyState : null}
+    </Paper>
   );
 }
 
@@ -150,6 +237,7 @@ export function Workspace() {
   const [propertiesFor, setPropertiesFor] = useState<FileEntry | null>(null);
   const [showUploads, setShowUploads] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [recycleBinOpen, setRecycleBinOpen] = useState(false);
   const [notice, setNotice] = useState<{ message: string; severity: AlertColor } | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -158,6 +246,7 @@ export function Workspace() {
   const [listingSort, setListingSort] = useState<ListingSort>('folders-first');
   const [pendingDelete, setPendingDelete] = useState<{ type: 'single'; entry: FileEntry } | { type: 'batch'; entries: FileEntry[] } | null>(null);
   const compact = useMediaQuery(theme.breakpoints.down('md'));
+  const mobile = useMediaQuery(theme.breakpoints.down('sm'));
   const listingQuery = useQuery({ queryKey: ['listing', currentPath], queryFn: () => api.getListing(currentPath) });
   const listing = listingQuery.data;
   const isRefreshing = listingQuery.isFetching && !listingQuery.isLoading;
@@ -264,7 +353,7 @@ export function Workspace() {
     if (action === 'preview') return window.location.assign(itemUrl('view', entry.path));
     if (action === 'rename') return setForm({ action: 'rename', entry });
     if (action === 'move' || action === 'copy') return setForm({ action, entry });
-    if (action === 'delete') return setPendingDelete({ type: 'single', entry });
+    if (action === 'trash') return setPendingDelete({ type: 'single', entry });
     const endpoints: Record<string, string> = { archive: 'do/zip', extract: 'do/extract', checksum: 'do/md5' };
     if (action in endpoints) mutation.mutate({ endpoint: endpoints[action], values: { path: entry.path }, affectedDirectories: affectedDirectories() });
   };
@@ -334,8 +423,10 @@ export function Workspace() {
           </Box>
           {!mutable && canUpload && <Chip label={t('workspace.uploadsOnly')} color="info" variant="outlined" />}
           {!mutable && !canUpload && <Chip label={t('workspace.readOnly')} variant="outlined" />}
-          <Stack direction="row" flexWrap="wrap" gap={1}>
+          <Box sx={{ display: { xs: 'grid', sm: 'flex' }, gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: undefined }, flexWrap: 'wrap', gap: 1, width: { xs: '100%', sm: 'auto' } }}>
             <Button
+              size={mobile ? 'small' : 'medium'}
+              sx={{ minWidth: 0 }}
               startIcon={refreshInProgress ? <CircularProgress color="inherit" size={18} /> : <Refresh />}
               variant="outlined"
               disabled={refreshInProgress}
@@ -343,10 +434,10 @@ export function Workspace() {
             >
               {refreshInProgress ? t('workspace.refreshing') : t('workspace.refresh')}
             </Button>
-            {mutable && <Button startIcon={<CreateNewFolder />} variant="outlined" onClick={() => setForm({ action: 'newdir' })}>{t('workspace.newFolder')}</Button>}
-            {mutable && <Button startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>}
-            {canUpload && <Button startIcon={<UploadFile />} variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button>}
-          </Stack>
+            {mutable && <Button size={mobile ? 'small' : 'medium'} sx={{ minWidth: 0 }} startIcon={<CreateNewFolder />} variant="outlined" onClick={() => setForm({ action: 'newdir' })}>{t('workspace.newFolder')}</Button>}
+            {mutable && <Button size={mobile ? 'small' : 'medium'} sx={{ minWidth: 0 }} startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>}
+            {canUpload && <Button size={mobile ? 'small' : 'medium'} sx={{ minWidth: 0 }} startIcon={<UploadFile />} variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button>}
+          </Box>
         </Box>
         {refreshError && <Alert severity="warning" action={<Button color="inherit" size="small" disabled={refreshInProgress} onClick={() => void handleManualRefresh()}>{t('action.retry')}</Button>}>{refreshError}</Alert>}
         {manualRefresh && <Typography role="status" aria-live="polite" sx={{ position: 'absolute', width: 1, height: 1, p: 0, m: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}>{t('workspace.refreshing')}</Typography>}
@@ -398,15 +489,41 @@ export function Workspace() {
             </TextField>
           </Stack>
         </Paper>
-        {selectedEntries.length > 0 && <Paper sx={{ ...surface, p: 1.25, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography variant="bodyStrong" sx={{ mr: 1 }}>{t('workspace.selected', { count: selectedEntries.length })}</Typography>
-          {mutable && <Button size="small" startIcon={<Folder />} onClick={() => setForm({ action: 'move' })}>{t('action.move')}</Button>}
-          {mutable && <Button size="small" startIcon={<ContentCopy />} onClick={() => setForm({ action: 'copy' })}>{t('action.copy')}</Button>}
-          {mutable && <Button size="small" color="error" startIcon={<Delete />} onClick={() => setPendingDelete({ type: 'batch', entries: selectedEntries })}>{t('action.delete')}</Button>}
-          <Button size="small" startIcon={<Archive />} onClick={() => doBatch('do/batch/download-zip')}>{t('action.batchDownload')}</Button>
-          <Button size="small" onClick={() => setSelected(new Set())}>{t('action.cancel')}</Button>
+        {selectedEntries.length > 0 && <Paper sx={{ ...surface, p: 1.25 }}>
+          <Stack spacing={1.25}>
+            <Typography variant="bodyStrong">{t('workspace.selected', { count: selectedEntries.length })}</Typography>
+            <Box sx={{ display: { xs: 'grid', sm: 'flex' }, gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: undefined }, flexWrap: 'wrap', gap: 0.75 }}>
+              {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<Folder />} onClick={() => setForm({ action: 'move' })}>{t('action.move')}</Button>}
+              {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<ContentCopy />} onClick={() => setForm({ action: 'copy' })}>{t('action.copy')}</Button>}
+              {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<DeleteOutline />} onClick={() => setPendingDelete({ type: 'batch', entries: selectedEntries })}>{t('action.moveToRecycleBin')}</Button>}
+              <Button size="small" sx={{ minWidth: 0 }} startIcon={<Archive />} onClick={() => doBatch('do/batch/download-zip')}>{t('action.batchDownload')}</Button>
+            </Box>
+            <Box><Button size="small" onClick={() => setSelected(new Set())}>{t('action.cancel')}</Button></Box>
+          </Stack>
         </Paper>}
-        <TableContainer component={Paper} aria-busy={refreshInProgress || undefined} sx={surface}>
+        {mobile ? <MobileFileList
+          entries={displayedEntries}
+          selected={selectedForCurrentToken}
+          selectionState={selectionState}
+          mutable={mutable}
+          editorAvailable={Boolean(session?.capabilities.editorSave || session?.capabilities.browse)}
+          busy={refreshInProgress}
+          onSelect={select}
+          onSelectAll={(checked) => setSelected(checked ? new Set(displayedEntries.map((entry) => entry.path)) : new Set())}
+          onAction={performEntryAction}
+          onMenu={(entry, anchor) => { setMenuEntry(entry); setMenuAnchor(anchor); }}
+          emptyState={entries.length === 0 ? <EmptyState
+            icon={<FolderOffOutlined />}
+            title={t('workspace.emptyTitle')}
+            caption={t('workspace.emptyHint')}
+            action={canUpload ? <Button variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button> : undefined}
+          /> : <EmptyState
+            icon={<FolderOffOutlined />}
+            title={t('workspace.noMatchesTitle')}
+            caption={t('workspace.noMatchesHint')}
+            action={<Button onClick={() => updateListingControls(() => { setSearchQuery(''); setKindFilter('all'); })}>{t('workspace.clearFilters')}</Button>}
+          />}
+        /> : <TableContainer component={Paper} aria-busy={refreshInProgress || undefined} sx={surface}>
           <Table stickyHeader size={compact ? 'small' : 'medium'} aria-label={t('app.workspace')}>
             <TableHead><TableRow>
               <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectAll')} checked={selectionState.allSelected} indeterminate={selectionState.partiallySelected} onChange={(event) => setSelected(event.target.checked ? new Set(displayedEntries.map((entry) => entry.path)) : new Set())} /></TableCell>
@@ -478,7 +595,7 @@ export function Workspace() {
               )}
             </TableBody>
           </Table>
-        </TableContainer>
+        </TableContainer>}
       </Stack>
     </Box>
   );
@@ -488,6 +605,9 @@ export function Workspace() {
       <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
         <Box sx={{ lineHeight: 0 }}><Mark size={22} /></Box>
         <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
+        <Tooltip title={t('recycleBin.title')}>
+          <IconButton aria-label={t('recycleBin.title')} onClick={() => setRecycleBinOpen(true)}><DeleteOutline /></IconButton>
+        </Tooltip>
         <Tooltip title={t('app.settings')}>
           <IconButton aria-label={t('app.settings')} onClick={() => setSettingsOpen(true)}><SettingsOutlined /></IconButton>
         </Tooltip>
@@ -499,6 +619,14 @@ export function Workspace() {
     {listingContent}
     {listing && <>
     <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    <RecycleBinPanel
+      open={recycleBinOpen}
+      onClose={() => setRecycleBinOpen(false)}
+      mutable={mutable}
+      currentDirectory={currentPath}
+      onRestored={refreshDirectory}
+      onNotice={(message, severity) => setNotice({ message, severity })}
+    />
     <EntryMenu entry={menuEntry} anchor={menuAnchor} onClose={() => { setMenuEntry(null); setMenuAnchor(null); }} onAction={performEntryAction} mutable={mutable} editorAvailable={Boolean(session?.capabilities.editorSave || session?.capabilities.browse)} />
     <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => mutation.mutate({ endpoint, values, affectedDirectories: affectedDirectories(values.destination) })} onBatchSubmit={doBatch} />
     <PropertiesDialog entry={propertiesFor} properties={propertyQuery.data?.properties} isLoading={propertyQuery.isLoading} onClose={() => setPropertiesFor(null)} />
@@ -508,13 +636,12 @@ export function Workspace() {
       open={Boolean(pendingDelete)}
       onClose={() => setPendingDelete(null)}
       title={pendingDelete?.type === 'batch'
-        ? t('dialog.confirmDeleteBatch', { count: pendingDelete.entries.length })
-        : t('dialog.confirmDelete', { name: pendingDelete?.type === 'single' ? pendingDelete.entry.name : '' })}
-      confirmLabel={t('action.delete')}
-      confirmTone="destructive"
+        ? t('dialog.confirmMoveToRecycleBinBatch', { count: pendingDelete.entries.length })
+        : t('dialog.confirmMoveToRecycleBin', { name: pendingDelete?.type === 'single' ? pendingDelete.entry.name : '' })}
+      confirmLabel={t('action.moveToRecycleBin')}
       onConfirm={confirmDelete}
     >
-      <Typography color="text.secondary">{t('dialog.deleteText')}</Typography>
+      <Typography color="text.secondary">{t('dialog.moveToRecycleBinText')}</Typography>
     </DialogShell>
     <Snackbar open={Boolean(notice)} autoHideDuration={6000} onClose={() => setNotice(null)}><Alert severity={notice?.severity ?? 'info'} variant="filled" onClose={() => setNotice(null)}>{notice?.message}</Alert></Snackbar>
     </>}
@@ -525,13 +652,13 @@ export function EntryMenu({ entry, anchor, onClose, onAction, mutable, editorAva
   const { t } = useI18n();
   if (!entry) return <Menu anchorEl={anchor} open={false} onClose={onClose} />;
   const visible = entryMenuActions(entry, mutable, editorAvailable);
-  const primary = visible.filter((item) => !item.destructive && ['download', 'preview', 'edit', 'properties', 'rename', 'move', 'copy', 'archive', 'extract', 'checksum'].includes(item.name));
-  const destructive = visible.filter((item) => item.destructive);
+  const primary = visible.filter((item) => item.name !== 'trash');
+  const destructive = visible.filter((item) => item.name === 'trash');
   const render = (item: EntryAction) => {
     const Icon = item.icon;
     return (
-      <MenuItem key={item.name} onClick={() => onAction(item.name, entry)} sx={item.destructive ? { color: 'error.main' } : undefined}>
-        <ListItemIcon sx={item.destructive ? { color: 'inherit' } : undefined}><Icon fontSize="small" /></ListItemIcon>
+      <MenuItem key={item.name} onClick={() => onAction(item.name, entry)}>
+        <ListItemIcon><Icon fontSize="small" /></ListItemIcon>
         {t(`action.${item.name}`)}
       </MenuItem>
     );

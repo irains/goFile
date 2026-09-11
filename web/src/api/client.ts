@@ -133,6 +133,47 @@ export function normalizeListing(response: ListingResponse): DirectoryListing {
   };
 }
 
+export interface TrashEntry {
+  id: string;
+  name: string;
+  originalPath: string;
+  kind: 'file' | 'directory';
+  sizeBytes: number;
+  deletedAt: string;
+}
+
+export interface TrashPage {
+  entries: TrashEntry[];
+  nextCursor?: string;
+}
+
+interface TrashResponse {
+  ok: true;
+  entries: Array<{
+    id: string;
+    name: string;
+    original_path: string;
+    kind: 'file' | 'directory';
+    size_bytes: number;
+    deleted_at: string;
+  }>;
+  next_cursor?: string;
+}
+
+function normalizeTrash(response: TrashResponse): TrashPage {
+  return {
+    entries: response.entries.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      originalPath: entry.original_path,
+      kind: entry.kind,
+      sizeBytes: entry.size_bytes,
+      deletedAt: entry.deleted_at
+    })),
+    nextCursor: response.next_cursor || undefined
+  };
+}
+
 export interface EditorDocument {
   path: string;
   name: string;
@@ -182,6 +223,10 @@ export const api = {
   getListing: async (path = '') => normalizeListing(await request<ListingResponse>(`api/listing?path=${encodeURIComponent(path)}`, { headers: jsonHeaders })),
   getDirectories: (path = '') => request<{ ok: true; path: string; dirs: Directory[] }>(`api/directories?path=${encodeURIComponent(path)}`, { headers: jsonHeaders }),
   getProperties: (path: string) => request<{ ok: true; properties: Properties }>(`api/properties?path=${encodeURIComponent(path)}`, { headers: jsonHeaders }),
+  getTrash: async (cursor?: string) => normalizeTrash(await request<TrashResponse>(`api/trash${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: jsonHeaders })),
+  restoreTrash: (id: string) => request<{ ok: true; path: string }>(`api/trash/${encodeURIComponent(id)}/restore`, { method: 'POST', headers: { ...csrfHeaders(), ...jsonHeaders } }),
+  purgeTrash: (id: string, confirmation: string) => request<{ ok: true }>(`api/trash/${encodeURIComponent(id)}/purge`, { method: 'POST', headers: { ...csrfHeaders(), 'Content-Type': 'application/json', ...jsonHeaders }, body: JSON.stringify({ confirmation }) }),
+  emptyTrash: (confirmation: string) => request<{ ok: true; affected: number }>('api/trash/empty', { method: 'POST', headers: { ...csrfHeaders(), 'Content-Type': 'application/json', ...jsonHeaders }, body: JSON.stringify({ confirmation }) }),
   getEditorContent: (path: string) => request<{ ok: true; editor: EditorDocument }>(`api/editor/content?path=${encodeURIComponent(path)}`, { headers: jsonHeaders }),
   saveEditorContent: (path: string, content: string, expectedVersion: string) => request<{ ok: true; editor: EditorDocument }>('api/editor/content', {
     method: 'PUT', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content, expected_version: expectedVersion })
