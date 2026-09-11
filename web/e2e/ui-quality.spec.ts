@@ -177,19 +177,35 @@ test('refresh folder is visible, responsive, and updates the listing', async ({ 
   expect(metrics.scrollWidth).toBe(metrics.clientWidth);
 });
 
-test('settings persists a selected accent without a mobile overflow', async ({ page }) => {
+test('settings switches complete palettes, persists choices, and fits mobile two-column controls', async ({ page }) => {
   await mockWorkspaceApi(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
 
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  await page.getByRole('radio', { name: 'Harbor' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-fileharbor-accent', 'harbor');
-  await expect(page.getByRole('radio', { name: 'Harbor' })).toBeChecked();
+  const paletteGroup = page.getByRole('radiogroup', { name: 'Color palette' });
+  await expect(paletteGroup.getByRole('radio')).toHaveCount(12);
+  const forestCanvas = await page.locator('html').evaluate((root) => getComputedStyle(root).backgroundColor);
+  await page.getByRole('radio', { name: 'Graphite' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-fileharbor-accent', 'graphite');
+  await expect(page.getByRole('radio', { name: 'Graphite' })).toBeChecked();
+  const graphiteCanvas = await page.locator('html').evaluate((root) => getComputedStyle(root).backgroundColor);
+  expect(graphiteCanvas).not.toBe(forestCanvas);
+  await expect(page.locator('header').filter({ hasText: 'FileHarbor' })).toHaveCSS('background-color', 'rgb(229, 233, 233)');
+
   await page.reload();
   await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('radio', { name: 'Graphite' })).toBeChecked();
+  await page.getByRole('radio', { name: 'Light' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-fileharbor-accent', 'graphite');
+
+  await page.getByRole('radio', { name: 'Forest' }).focus();
+  await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('radio', { name: 'Harbor' })).toBeChecked();
+  await page.getByRole('radio', { name: '简体中文' }).click();
+  await expect(page.getByRole('radiogroup', { name: '配色方案' }).getByRole('radio')).toHaveCount(12);
+  await expect(page.getByRole('radio', { name: '石墨' })).toBeVisible();
 
   const metrics = await page.locator('body').evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
   expect(metrics.scrollWidth).toBe(metrics.clientWidth);

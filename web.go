@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -231,9 +232,14 @@ func spaCSP(value string) string {
 	return "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'nonce-" + value + "'; style-src 'self' 'nonce-" + value + "'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:"
 }
 
+//go:embed web/src/prepaint.css
+var embeddedThemePrepaintCSS string
+
+const themeBootstrapScript = `(function(){var mode="system",accent="forest",resolved="light";try{var storedMode=localStorage.getItem("fileharbor-mode"),storedAccent=localStorage.getItem("fileharbor-accent");if(storedMode==="light"||storedMode==="dark"||storedMode==="system"){mode=storedMode}if(storedAccent==="forest"||storedAccent==="harbor"||storedAccent==="slate"||storedAccent==="orchid"||storedAccent==="cedar"||storedAccent==="fjord"||storedAccent==="juniper"||storedAccent==="ember"||storedAccent==="dune"||storedAccent==="saffron"||storedAccent==="mulberry"||storedAccent==="graphite"){accent=storedAccent}}catch(_){ }if(mode==="light"){resolved="light"}else if(mode==="dark"){resolved="dark"}else{resolved=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light"}var root=document.documentElement;root.setAttribute("data-mui-color-scheme",resolved);root.setAttribute("data-fileharbor-accent",accent)}());`
+
 func themePrepaint(value string) string {
 	nonce := htmlAttribute(value)
-	return `<script nonce="` + nonce + `">(function(){var mode="system",accent="forest",resolved="light";try{var storedMode=localStorage.getItem("fileharbor-mode"),storedAccent=localStorage.getItem("fileharbor-accent");if(storedMode==="light"||storedMode==="dark"||storedMode==="system"){mode=storedMode}if(storedAccent==="forest"||storedAccent==="harbor"||storedAccent==="slate"||storedAccent==="orchid"||storedAccent==="cedar"){accent=storedAccent}}catch(_){ }if(mode==="light"){resolved="light"}else if(mode==="dark"){resolved="dark"}else{resolved=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light"}var root=document.documentElement;root.setAttribute("data-mui-color-scheme",resolved);root.setAttribute("data-fileharbor-accent",accent)}());</script><style nonce="` + nonce + `">:root{--fileharbor-dot:219 231 207;--fileharbor-wash:128 159 113;--fileharbor-focus:#9EC6A0;color-scheme:dark;background-color:#171D18;background-image:radial-gradient(circle at 1px 1px,rgb(var(--fileharbor-dot) / 2.6%) 0 .65px,transparent .8px),linear-gradient(118deg,rgb(var(--fileharbor-wash) / 2%),transparent 42%,rgb(100 172 180 / 1.8%));background-size:13px 13px,100% 100%;color:#F0F1E7}:root[data-mui-color-scheme="light"]{--fileharbor-dot:67 84 54;--fileharbor-wash:89 111 74;--fileharbor-focus:#2D533B;color-scheme:light;background-color:#F3F0E7;background-image:radial-gradient(circle at 1px 1px,rgb(var(--fileharbor-dot) / 4%) 0 .65px,transparent .8px),linear-gradient(118deg,rgb(var(--fileharbor-wash) / 2.5%),transparent 42%,rgb(37 99 109 / 2.5%));background-size:13px 13px,100% 100%;color:#242820}:root[data-fileharbor-accent="harbor"]{--fileharbor-dot:212 235 238;--fileharbor-wash:105 168 181;--fileharbor-focus:#8EC8D3}:root[data-fileharbor-accent="slate"]{--fileharbor-dot:224 231 244;--fileharbor-wash:141 164 200;--fileharbor-focus:#B5C6E1}:root[data-fileharbor-accent="orchid"]{--fileharbor-dot:239 226 243;--fileharbor-wash:178 139 190;--fileharbor-focus:#D2B7DE}:root[data-fileharbor-accent="cedar"]{--fileharbor-dot:244 226 194;--fileharbor-wash:200 151 85;--fileharbor-focus:#E7BF84}:root[data-mui-color-scheme="light"][data-fileharbor-accent="harbor"]{--fileharbor-dot:45 90 101;--fileharbor-wash:55 116 132;--fileharbor-focus:#174D5A}:root[data-mui-color-scheme="light"][data-fileharbor-accent="slate"]{--fileharbor-dot:70 84 106;--fileharbor-wash:83 107 139;--fileharbor-focus:#36485F}:root[data-mui-color-scheme="light"][data-fileharbor-accent="orchid"]{--fileharbor-dot:104 78 111;--fileharbor-wash:127 91 137;--fileharbor-focus:#553B60}:root[data-mui-color-scheme="light"][data-fileharbor-accent="cedar"]{--fileharbor-dot:118 77 44;--fileharbor-wash:151 96 55;--fileharbor-focus:#69401E}</style>`
+	return `<script nonce="` + nonce + `">` + themeBootstrapScript + `</script><style nonce="` + nonce + `">` + embeddedThemePrepaintCSS + `</style>`
 }
 
 func serveShell(c *gin.Context, bundle *webAssets) {

@@ -34,7 +34,15 @@ test.describe('Go service integration', () => {
     await dialog.getByRole('button', { name: 'Confirm' }).click();
     await expect(page.getByRole('link', { name: folderName })).toBeVisible();
 
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('radio', { name: 'Graphite' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-fileharbor-accent', 'graphite');
+    await page.getByRole('button', { name: 'Close' }).click();
+
     await page.reload();
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('radio', { name: 'Graphite' })).toBeChecked();
+    await page.getByRole('button', { name: 'Close' }).click();
     await expect(page.getByRole('link', { name: folderName })).toBeVisible();
   });
 });

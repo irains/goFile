@@ -46,8 +46,19 @@ func TestEmbeddedSPAShellAndAssets(t *testing.T) {
 	if !bytes.Contains(response.Body.Bytes(), []byte("/fileharbor/assets/"+entryAsset)) || bytes.Contains(response.Body.Bytes(), []byte("fileharbor-csrf")) || !bytes.Contains(response.Body.Bytes(), []byte("fileharbor-nonce")) || !bytes.Contains(response.Body.Bytes(), []byte("fileharbor-login-next")) {
 		t.Fatalf("shell metadata or embedded asset reference is invalid: %s", response.Body.String())
 	}
-	if !strings.Contains(body, `localStorage.getItem("fileharbor-mode")`) || !strings.Contains(body, `localStorage.getItem("fileharbor-accent")`) || !strings.Contains(body, `data-mui-color-scheme`) || !strings.Contains(body, `data-fileharbor-accent`) || !strings.Contains(body, `nonce="`) || !strings.Contains(body, `#171D18`) || !strings.Contains(body, `#F3F0E7`) {
+	if !strings.Contains(body, `localStorage.getItem("fileharbor-mode")`) || !strings.Contains(body, `localStorage.getItem("fileharbor-accent")`) || !strings.Contains(body, `data-mui-color-scheme`) || !strings.Contains(body, `data-fileharbor-accent`) || !strings.Contains(body, `nonce="`) || !strings.Contains(body, `--fileharbor-canvas`) || !strings.Contains(body, `--fileharbor-overlay`) || !strings.Contains(body, `--fileharbor-table-header`) {
 		t.Fatalf("shell theme bootstrap is invalid: %s", body)
+	}
+	for _, palette := range []string{"forest", "harbor", "slate", "orchid", "cedar", "fjord", "juniper", "ember", "dune", "saffron", "mulberry", "graphite"} {
+		if !strings.Contains(body, `"`+palette+`"`) {
+			t.Fatalf("shell allowlist is missing complete palette %q: %s", palette, body)
+		}
+		if palette != "forest" && !strings.Contains(body, `data-fileharbor-accent="`+palette+`"`) {
+			t.Fatalf("shell prepaint is missing palette selector %q: %s", palette, body)
+		}
+	}
+	if !strings.Contains(body, `#F0F2F2`) || !strings.Contains(body, `#1C2224`) {
+		t.Fatalf("shell prepaint is missing Graphite light and dark surfaces: %s", body)
 	}
 	if strings.Contains(body, `root.style.colorScheme`) {
 		t.Fatalf("theme bootstrap must not pin a stale inline color scheme: %s", body)

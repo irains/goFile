@@ -15,30 +15,39 @@ function renderPanel() {
 }
 
 describe('SettingsPanel', () => {
-  it('renders labelled mode, accent, and language groups', () => {
+  it('renders labelled appearance, palette, and language groups', () => {
     renderPanel();
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('radiogroup', { name: 'Appearance' })).toBeInTheDocument();
-    expect(screen.getByRole('radiogroup', { name: 'Accent color' })).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: 'Color palette' })).toBeInTheDocument();
+    expect(screen.getByText('Changes page surfaces and controls. Appearance chooses light or dark.')).toBeInTheDocument();
     expect(screen.getByRole('radiogroup', { name: 'Language' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Forest' })).toBeChecked();
-    expect(screen.getAllByRole('radio')).toHaveLength(10);
+    expect(screen.getByRole('radio', { name: 'Graphite' })).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(17);
   });
 
-  it('persists a validated accent choice immediately', () => {
+  it('persists a validated full palette choice immediately', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
     renderPanel();
-    fireEvent.click(screen.getByRole('radio', { name: 'Harbor' }));
-    expect(screen.getByRole('radio', { name: 'Harbor' })).toBeChecked();
-    expect(document.documentElement).toHaveAttribute('data-fileharbor-accent', 'harbor');
-    expect(setItem).toHaveBeenCalledWith('fileharbor-accent', 'harbor');
+    fireEvent.click(screen.getByRole('radio', { name: 'Graphite' }));
+    expect(screen.getByRole('radio', { name: 'Graphite' })).toBeChecked();
+    expect(document.documentElement).toHaveAttribute('data-fileharbor-accent', 'graphite');
+    expect(setItem).toHaveBeenCalledWith('fileharbor-accent', 'graphite');
   });
 
-  it('switches visible labels with the selected language', () => {
+  it('keeps palette previews out of the accessibility tree', () => {
+    renderPanel();
+    expect(document.querySelectorAll('[aria-hidden="true"]')).not.toHaveLength(0);
+  });
+
+  it('switches visible palette labels with the selected language', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('radio', { name: '简体中文' }));
     expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument();
-    expect(screen.getByRole('radiogroup', { name: '主题色' })).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: '配色方案' })).toBeInTheDocument();
+    expect(screen.getByText('更改页面底色、面板和控件。外观决定浅色或深色。')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: '港湾' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '石墨' })).toBeInTheDocument();
   });
 });

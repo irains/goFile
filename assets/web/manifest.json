@@ -9,8 +9,8 @@
       "assets/fileharbor-logo-COXRcvQZ.svg"
     ]
   },
-  "_Workspace-CraFR_cX.js": {
-    "file": "assets/Workspace-CraFR_cX.js",
+  "_Workspace-DwAIkoM0.js": {
+    "file": "assets/Workspace-DwAIkoM0.js",
     "name": "Workspace",
     "isDynamicEntry": true,
     "imports": [
@@ -18,7 +18,7 @@
       "_react-D2EREKHA.js",
       "_query-BczUEuZz.js",
       "_Mark-BSftdmHg.js",
-      "_mui-BHhwRMCG.js",
+      "_mui-Bs4O6otU.js",
       "_vendor-C9sUiLVG.js",
       "_router-CBUVEgyz.js"
     ],
@@ -156,8 +156,8 @@
       "_react-D2EREKHA.js"
     ]
   },
-  "_mui-BHhwRMCG.js": {
-    "file": "assets/mui-BHhwRMCG.js",
+  "_mui-Bs4O6otU.js": {
+    "file": "assets/mui-Bs4O6otU.js",
     "name": "mui",
     "imports": [
       "_vendor-C9sUiLVG.js",
@@ -207,23 +207,23 @@
     ]
   },
   "index.html": {
-    "file": "assets/index-Dq6QE-sr.js",
+    "file": "assets/index-DZ0-dtah.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
       "_react-D2EREKHA.js",
       "_router-CBUVEgyz.js",
-      "_mui-BHhwRMCG.js",
+      "_mui-Bs4O6otU.js",
       "_query-BczUEuZz.js",
       "_vendor-C9sUiLVG.js"
     ],
     "dynamicImports": [
       "src/components/LoginPage.tsx",
-      "_Workspace-CraFR_cX.js"
+      "_Workspace-DwAIkoM0.js"
     ],
     "css": [
-      "assets/index-BqrikwNV.css"
+      "assets/index-gcHm37fw.css"
     ]
   },
   "src/assets/fileharbor-logo.svg": {
@@ -231,7 +231,7 @@
     "src": "src/assets/fileharbor-logo.svg"
   },
   "src/components/LoginPage.tsx": {
-    "file": "assets/LoginPage-Beyt3nhB.js",
+    "file": "assets/LoginPage-BI7lFlIG.js",
     "name": "LoginPage",
     "src": "src/components/LoginPage.tsx",
     "isDynamicEntry": true,
@@ -240,21 +240,21 @@
       "_vendor-C9sUiLVG.js",
       "index.html",
       "_Mark-BSftdmHg.js",
-      "_mui-BHhwRMCG.js",
+      "_mui-Bs4O6otU.js",
       "_router-CBUVEgyz.js",
       "_query-BczUEuZz.js"
     ]
   },
   "src/editor/EditorDialog.tsx": {
-    "file": "assets/EditorDialog-CEk1Ejna.js",
+    "file": "assets/EditorDialog-BDPIwRs7.js",
     "name": "EditorDialog",
     "src": "src/editor/EditorDialog.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
       "_react-D2EREKHA.js",
-      "_Workspace-CraFR_cX.js",
-      "_mui-BHhwRMCG.js",
+      "_Workspace-DwAIkoM0.js",
+      "_mui-Bs4O6otU.js",
       "_router-CBUVEgyz.js",
       "_query-BczUEuZz.js",
       "_vendor-C9sUiLVG.js",

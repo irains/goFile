@@ -13,7 +13,20 @@
           const storedMode = localStorage.getItem('fileharbor-mode');
           const storedAccent = localStorage.getItem('fileharbor-accent');
           mode = (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') ? storedMode : 'system';
-          accent = (storedAccent === 'forest' || storedAccent === 'harbor' || storedAccent === 'slate' || storedAccent === 'orchid' || storedAccent === 'cedar') ? storedAccent : 'forest';
+          accent = (
+            storedAccent === 'forest' ||
+            storedAccent === 'harbor' ||
+            storedAccent === 'slate' ||
+            storedAccent === 'orchid' ||
+            storedAccent === 'cedar' ||
+            storedAccent === 'fjord' ||
+            storedAccent === 'juniper' ||
+            storedAccent === 'ember' ||
+            storedAccent === 'dune' ||
+            storedAccent === 'saffron' ||
+            storedAccent === 'mulberry' ||
+            storedAccent === 'graphite'
+          ) ? storedAccent : 'forest';
         } catch (_) {}
         const mediaDark = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
         const resolved = mode === 'light' ? 'light' : mode === 'dark' ? 'dark' : (mediaDark ? 'dark' : 'light');

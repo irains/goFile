@@ -50,7 +50,7 @@ describe('design tokens', () => {
     expect(surface).toMatchObject({ borderRadius: `${radii.md}px`, bgcolor: 'background.paper' });
   });
 
-  it('uses explicit warm material roles for the default Forest preset', () => {
+  it('uses explicit warm material roles for the default Forest palette', () => {
     const theme = createAppTheme('forest');
     const colorSchemes = (theme as unknown as {
       colorSchemes: {
@@ -70,23 +70,43 @@ describe('design tokens', () => {
     expect(dark.info?.main).toBe('#84C5CC');
   });
 
-  it('keeps text, primary actions, and fixed semantic colors contrast-safe for every preset', () => {
+  it('maps every palette to distinct page surfaces while preserving semantic status colors', () => {
+    const lightCanvases = new Set<string>();
+    const darkCanvases = new Set<string>();
     for (const accentId of accentIds) {
       const theme = createAppTheme(accentId);
       const colorSchemes = (theme as unknown as {
         colorSchemes: {
-          light: { palette: { background: { paper: string }; primary: { main: string; contrastText: string }; success: { main: string }; warning: { main: string }; error: { main: string }; info: { main: string } } };
-          dark: { palette: { background: { default: string; paper: string }; primary: { main: string; contrastText: string }; success: { main: string }; warning: { main: string }; error: { main: string }; info: { main: string } } };
+          light: { palette: { background: { default: string; paper: string }; primary: { main: string; contrastText: string }; text: { primary: string }; divider: string; AppBar: { defaultBg: string }; success: { main: string }; warning: { main: string }; error: { main: string }; info: { main: string } } };
+          dark: { palette: { background: { default: string; paper: string }; primary: { main: string; contrastText: string }; text: { primary: string }; divider: string; AppBar: { defaultBg: string }; success: { main: string }; warning: { main: string }; error: { main: string }; info: { main: string } } };
         };
       }).colorSchemes;
       const light = colorSchemes.light.palette;
       const dark = colorSchemes.dark.palette;
-      expect(light.primary.main).toBe(accentPalettes[accentId].light.main);
-      expect(dark.primary.main).toBe(accentPalettes[accentId].dark.main);
+      const lightPalette = accentPalettes[accentId].light;
+      const darkPalette = accentPalettes[accentId].dark;
+      lightCanvases.add(light.background.default);
+      darkCanvases.add(dark.background.default);
+      expect(light.background.default).toBe(lightPalette.canvas);
+      expect(light.background.paper).toBe(lightPalette.paper);
+      expect(light.primary.main).toBe(lightPalette.primary.main);
+      expect(light.text.primary).toBe(lightPalette.text.primary);
+      expect(light.divider).toBe(lightPalette.divider);
+      expect(light.AppBar.defaultBg).toBe(lightPalette.appBar);
+      expect(dark.background.default).toBe(darkPalette.canvas);
+      expect(dark.background.paper).toBe(darkPalette.paper);
+      expect(dark.primary.main).toBe(darkPalette.primary.main);
+      expect(dark.text.primary).toBe(darkPalette.text.primary);
+      expect(dark.divider).toBe(darkPalette.divider);
+      expect(dark.AppBar.defaultBg).toBe(darkPalette.appBar);
+      expect(contrast(light.text.primary, light.background.paper)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(light.primary.main, light.background.paper)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(light.primary.contrastText, light.primary.main)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(lightPalette.focus, light.background.paper)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(dark.text.primary, dark.background.paper)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(dark.primary.main, dark.background.default)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(dark.primary.contrastText, dark.primary.main)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(darkPalette.focus, dark.background.paper)).toBeGreaterThanOrEqual(4.5);
       expect(light.success.main).toBe('#3C6A4D');
       expect(light.warning.main).toBe('#9A651D');
       expect(light.error.main).toBe('#A2443C');
@@ -96,6 +116,8 @@ describe('design tokens', () => {
       expect(dark.error.main).toBe('#F0A19A');
       expect(dark.info.main).toBe('#84C5CC');
     }
+    expect(lightCanvases).toHaveLength(accentIds.length);
+    expect(darkCanvases).toHaveLength(accentIds.length);
   });
 
   it('keeps primary text and material surfaces contrast-safe', () => {
@@ -104,13 +126,12 @@ describe('design tokens', () => {
     expect(contrast('#F0F1E7', '#222A22')).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('derives light-mode component shadows from the selected primary color', () => {
+  it('derives component shadows from the selected palette surface', () => {
     const harbor = createAppTheme('harbor');
     const button = harbor.components?.MuiButton?.styleOverrides;
     const root = button?.root as ((props: { theme: typeof harbor }) => Record<string, unknown>);
-    const lightHarbor = { ...harbor, palette: { ...harbor.palette, mode: 'light' as const, primary: { ...harbor.palette.primary, dark: '#174D5A' } } };
-    const hover = root({ theme: lightHarbor })['&:hover'] as { boxShadow: string };
-    expect(hover.boxShadow).toContain('rgba(23, 77, 90');
+    const hover = root({ theme: harbor })['&:hover'] as { boxShadow: string };
+    expect(hover.boxShadow).toContain('var(--fileharbor-shadow)');
   });
   it('supports fractional spacing used by compact stacks and rows', () => {
     const theme = createAppTheme();
@@ -150,7 +171,7 @@ describe('design tokens', () => {
     const tableRowRoot = tableRow?.root as ((props: { theme: typeof theme }) => Record<string, unknown>);
     const iconButtonRoot = iconButton?.root as ((props: { theme: typeof theme }) => Record<string, unknown>);
     expect(tableCell?.head).toMatchObject({
-      backgroundColor: 'var(--mui-palette-background-paper)',
+      backgroundColor: 'var(--fileharbor-table-header)',
       color: 'var(--mui-palette-text-secondary)'
     });
     expect(tableRowRoot({ theme })).toMatchObject({

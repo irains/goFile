@@ -13,7 +13,20 @@
           const storedMode = localStorage.getItem('fileharbor-mode');
           const storedAccent = localStorage.getItem('fileharbor-accent');
           mode = (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') ? storedMode : 'system';
-          accent = (storedAccent === 'forest' || storedAccent === 'harbor' || storedAccent === 'slate' || storedAccent === 'orchid' || storedAccent === 'cedar') ? storedAccent : 'forest';
+          accent = (
+            storedAccent === 'forest' ||
+            storedAccent === 'harbor' ||
+            storedAccent === 'slate' ||
+            storedAccent === 'orchid' ||
+            storedAccent === 'cedar' ||
+            storedAccent === 'fjord' ||
+            storedAccent === 'juniper' ||
+            storedAccent === 'ember' ||
+            storedAccent === 'dune' ||
+            storedAccent === 'saffron' ||
+            storedAccent === 'mulberry' ||
+            storedAccent === 'graphite'
+          ) ? storedAccent : 'forest';
         } catch (_) {}
         const mediaDark = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
         const resolved = mode === 'light' ? 'light' : mode === 'dark' ? 'dark' : (mediaDark ? 'dark' : 'light');
@@ -23,13 +36,13 @@
       })();
     </script>
     <title>FileHarbor</title>
-    <script type="module" crossorigin src="./assets/index-Dq6QE-sr.js"></script>
+    <script type="module" crossorigin src="./assets/index-DZ0-dtah.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/react-D2EREKHA.js">
     <link rel="modulepreload" crossorigin href="./assets/router-CBUVEgyz.js">
     <link rel="modulepreload" crossorigin href="./assets/vendor-C9sUiLVG.js">
-    <link rel="modulepreload" crossorigin href="./assets/mui-BHhwRMCG.js">
+    <link rel="modulepreload" crossorigin href="./assets/mui-Bs4O6otU.js">
     <link rel="modulepreload" crossorigin href="./assets/query-BczUEuZz.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-BqrikwNV.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-gcHm37fw.css">
   </head>
   <body>
     <div id="root"></div>

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { accentIds, aceThemeForMode, defaultAccentId, isAccentId, isThemeMode, persistAccentId, readStoredAccentId, readStoredThemeMode, resolveColorScheme, systemPrefersDark, themeAccentStorageKey } from './theme';
+import { accentIds, accentPalettes, aceThemeForMode, defaultAccentId, isAccentId, isThemeMode, persistAccentId, readStoredAccentId, readStoredThemeMode, resolveColorScheme, systemPrefersDark, themeAccentStorageKey } from './theme';
 
 describe('appearance helpers', () => {
   it('uses the light Ace theme only for the light scheme', () => {
@@ -30,13 +30,30 @@ describe('appearance helpers', () => {
     expect(isThemeMode('auto')).toBe(false);
   });
 
-  it('allows only curated accent IDs', () => {
-    expect(accentIds).toEqual(['forest', 'harbor', 'slate', 'orchid', 'cedar']);
+  it('allows only the twelve curated page palette IDs', () => {
+    expect(accentIds).toEqual(['forest', 'harbor', 'slate', 'orchid', 'cedar', 'fjord', 'juniper', 'ember', 'dune', 'saffron', 'mulberry', 'graphite']);
     for (const accentId of accentIds) expect(isAccentId(accentId)).toBe(true);
     expect(isAccentId('#236676')).toBe(false);
     expect(isAccentId('red')).toBe(false);
     expect(isAccentId('')).toBe(false);
     expect(isAccentId(null)).toBe(false);
+  });
+
+  it('gives every palette complete light and dark surface roles', () => {
+    for (const accentId of accentIds) {
+      for (const scheme of ['light', 'dark'] as const) {
+        const palette = accentPalettes[accentId][scheme];
+        expect(palette.canvas).toMatch(/^#/);
+        expect(palette.paper).toMatch(/^#/);
+        expect(palette.appBar).toMatch(/^#/);
+        expect(palette.overlay).toMatch(/^#/);
+        expect(palette.tableHeader).toMatch(/^#/);
+        expect(palette.text.primary).toMatch(/^#/);
+        expect(palette.divider).toMatch(/^#/);
+        expect(palette.focus).toMatch(/^#/);
+        expect(palette.texture.dot).toMatch(/^\d+ \d+ \d+$/);
+      }
+    }
   });
 });
 
@@ -60,7 +77,7 @@ describe('stored preferences', () => {
     expect(readStoredThemeMode()).toBe('system');
   });
 
-  it('restores only a valid accent and defaults otherwise', () => {
+  it('restores legacy and new palette IDs, but defaults invalid values', () => {
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -69,6 +86,8 @@ describe('stored preferences', () => {
     expect(readStoredAccentId()).toBe(defaultAccentId);
     storage.set(themeAccentStorageKey, 'orchid');
     expect(readStoredAccentId()).toBe('orchid');
+    storage.set(themeAccentStorageKey, 'graphite');
+    expect(readStoredAccentId()).toBe('graphite');
     storage.set(themeAccentStorageKey, '#abcdef');
     expect(readStoredAccentId()).toBe(defaultAccentId);
     persistAccentId('cedar');

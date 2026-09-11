@@ -484,7 +484,7 @@ export function Workspace() {
   );
 
   return <Box component="main" sx={{ minHeight: '100dvh' }}>
-    <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
+    <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'var(--mui-palette-AppBar-defaultBg)' }}>
       <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
         <Box sx={{ lineHeight: 0 }}><Mark size={22} /></Box>
         <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>

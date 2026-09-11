@@ -3,8 +3,46 @@ import { Box, FormControl, FormControlLabel, FormHelperText, FormLabel, Radio, R
 import { useColorScheme } from '@mui/material/styles';
 import { useThemePreferences } from '../appearance/ThemePreferencesProvider';
 import { useI18n } from '../i18n';
-import { accentIds, accentPalettes, type ThemeMode } from '../theme';
+import { accentIds, accentPalettes, type AccentId, type ThemeMode } from '../theme';
 import { SidePanel } from './SidePanel';
+
+function paletteLabelKey(id: AccentId) {
+  return `settings.palette${id[0].toUpperCase()}${id.slice(1)}` as const;
+}
+
+function PalettePreview({ palette }: { palette: (typeof accentPalettes)[AccentId]['light'] }) {
+  return (
+    <Box
+      aria-hidden
+      sx={{
+        position: 'relative',
+        width: 66,
+        height: 48,
+        flex: '0 0 auto',
+        overflow: 'hidden',
+        border: '1px solid',
+        borderColor: palette.divider,
+        borderRadius: 0.75,
+        bgcolor: palette.canvas,
+        backgroundImage: `radial-gradient(circle at 1px 1px, rgb(${palette.texture.dot} / 14%) 0 0.5px, transparent 0.7px)`,
+        backgroundSize: '7px 7px'
+      }}
+    >
+      <Box sx={{ height: 7, bgcolor: palette.appBar, borderBottom: '1px solid', borderColor: palette.divider }} />
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 14px', gap: 0.5, p: 0.5 }}>
+        <Box sx={{ height: 30, p: 0.5, border: '1px solid', borderColor: palette.divider, bgcolor: palette.paper }}>
+          <Box sx={{ height: 3, width: '68%', bgcolor: palette.text.primary, opacity: 0.78 }} />
+          <Box sx={{ height: 3, mt: 0.5, width: '88%', bgcolor: palette.divider }} />
+          <Box sx={{ height: 4, mt: 0.75, bgcolor: palette.action.selected, border: '1px solid', borderColor: palette.primary.light }} />
+        </Box>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          <Box sx={{ height: 10, borderRadius: 0.5, bgcolor: palette.primary.main }} />
+          <Box sx={{ flex: 1, border: '1px solid', borderColor: palette.divider, bgcolor: palette.overlay }} />
+        </Box>
+      </Box>
+    </Box>
+  );
+}
 
 export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t, locale, setLocale } = useI18n();
@@ -27,27 +65,46 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
         </FormControl>
 
         <FormControl component="fieldset">
-          <FormLabel component="legend" id="settings-accent">{t('settings.accent')}</FormLabel>
+          <FormLabel component="legend" id="settings-palette">{t('settings.palette')}</FormLabel>
+          <FormHelperText sx={{ mt: 0.5 }}>{t('settings.paletteHint')}</FormHelperText>
           <RadioGroup
-            aria-labelledby="settings-accent"
+            aria-labelledby="settings-palette"
             value={accentId}
-            onChange={(event) => setAccentId(event.target.value as typeof accentId)}
-            sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1, mt: 1 }}
+            onChange={(event) => setAccentId(event.target.value as AccentId)}
+            sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, mt: 1 }}
           >
             {accentIds.map((id) => {
               const palette = accentPalettes[id][accentScheme];
+              const checked = accentId === id;
               return (
                 <FormControlLabel
                   key={id}
                   value={id}
-                  control={<Radio />}
+                  control={<Radio size="small" />}
                   label={
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
-                      <Box aria-hidden sx={{ width: 14, height: 14, flex: '0 0 auto', borderRadius: '50%', bgcolor: palette.main, border: '1px solid', borderColor: palette.dark }} />
-                      <Typography variant="bodyStrong" component="span">{t(`settings.accent${id[0].toUpperCase()}${id.slice(1)}`)}</Typography>
+                    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+                      <PalettePreview palette={palette} />
+                      <Typography variant="bodyStrong" component="span" sx={{ lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+                        {t(paletteLabelKey(id))}
+                      </Typography>
                     </Stack>
                   }
-                  sx={{ minHeight: 48, m: 0, px: 0.75, border: '1px solid', borderColor: accentId === id ? 'primary.main' : 'divider', borderRadius: 1, bgcolor: accentId === id ? 'action.selected' : 'transparent', '&:hover': { bgcolor: accentId === id ? 'action.selected' : 'action.hover' }, '@media (pointer: coarse)': { minHeight: 48 } }}
+                  sx={{
+                    minHeight: 92,
+                    m: 0,
+                    px: 0.75,
+                    py: 0.5,
+                    alignItems: 'center',
+                    border: '1px solid',
+                    borderColor: checked ? 'primary.main' : 'divider',
+                    borderRadius: 1,
+                    bgcolor: checked ? 'action.selected' : 'transparent',
+                    '& .MuiRadio-root': { p: 0.5, mr: 0.25 },
+                    '& .MuiFormControlLabel-label': { minWidth: 0, display: 'flex', flex: 1 },
+                    '&:hover': { bgcolor: checked ? 'action.selected' : 'action.hover' },
+                    '&:has(.MuiRadio-root.Mui-focusVisible)': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 },
+                    '@media (pointer: coarse)': { minHeight: 92 }
+                  }}
                 />
               );
             })}

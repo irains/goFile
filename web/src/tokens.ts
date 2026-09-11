@@ -1,4 +1,4 @@
-import { type SxProps, type Theme, alpha, createTheme } from '@mui/material/styles';
+import { type SxProps, type Theme, createTheme } from '@mui/material/styles';
 import type { AccentId } from './theme';
 import { accentPalettes } from './theme';
 import type { CSSProperties } from 'react';
@@ -125,20 +125,20 @@ const compactTouchTarget = {
 // App theme factory.
 // ──────────────────────────────────────────────────────────────────────────────
 export function createAppTheme(accentId: AccentId = 'forest') {
-  const accent = accentPalettes[accentId];
+  const palette = accentPalettes[accentId];
   return createTheme({
     cssVariables: { colorSchemeSelector: 'data-mui-color-scheme' },
     defaultColorScheme: 'dark',
     colorSchemes: {
       light: {
         palette: {
-          primary: accent.light,
-          secondary: { main: '#286470', light: '#5C9299', dark: '#1D4C55', contrastText: '#FBF9F2' },
-          background: { default: '#F3F0E7', paper: '#FBF9F2' },
-          text: { primary: '#242820', secondary: '#596052', disabled: '#7A8074' },
-          divider: '#D9D5C6',
-          action: { hover: alpha(accent.light.main, 0.055), selected: alpha(accent.light.main, 0.11), disabled: 'rgba(36, 40, 32, 0.12)', disabledBackground: 'rgba(36, 40, 32, 0.08)' },
-          AppBar: { defaultBg: '#F3F0E7', darkBg: '#F3F0E7' },
+          primary: palette.light.primary,
+          secondary: palette.light.secondary,
+          background: { default: palette.light.canvas, paper: palette.light.paper },
+          text: palette.light.text,
+          divider: palette.light.divider,
+          action: palette.light.action,
+          AppBar: { defaultBg: palette.light.appBar, darkBg: palette.light.appBar },
           success: { main: '#3C6A4D', light: '#70967A', dark: '#2D533B', contrastText: '#FBF9F2' },
           warning: { main: '#9A651D', light: '#C39148', dark: '#754811', contrastText: '#242820' },
           error: { main: '#A2443C', light: '#C97971', dark: '#7C302B', contrastText: '#FBF9F2' },
@@ -147,13 +147,13 @@ export function createAppTheme(accentId: AccentId = 'forest') {
       },
       dark: {
         palette: {
-          primary: accent.dark,
-          secondary: { main: '#84C5CC', light: '#B4E0E2', dark: '#55939B', contrastText: '#171D18' },
-          background: { default: '#171D18', paper: '#222A22' },
-          text: { primary: '#F0F1E7', secondary: '#C1C7B9', disabled: '#899286' },
-          divider: '#3B463C',
-          action: { hover: alpha(accent.dark.light, 0.075), selected: alpha(accent.dark.main, 0.16), disabled: 'rgba(240, 241, 231, 0.13)', disabledBackground: 'rgba(240, 241, 231, 0.08)' },
-          AppBar: { defaultBg: '#171D18', darkBg: '#171D18' },
+          primary: palette.dark.primary,
+          secondary: palette.dark.secondary,
+          background: { default: palette.dark.canvas, paper: palette.dark.paper },
+          text: palette.dark.text,
+          divider: palette.dark.divider,
+          action: palette.dark.action,
+          AppBar: { defaultBg: palette.dark.appBar, darkBg: palette.dark.appBar },
           success: { main: '#9EC6A0', light: '#C4DEC4', dark: '#729D77', contrastText: '#171D18' },
           warning: { main: '#E6B76E', light: '#F2D39B', dark: '#B98235', contrastText: '#171D18' },
           error: { main: '#F0A19A', light: '#F7C3BD', dark: '#C9746C', contrastText: '#171D18' },
@@ -189,26 +189,26 @@ export function createAppTheme(accentId: AccentId = 'forest') {
     components: {
       MuiButton: {
         styleOverrides: {
-          root: ({ theme }) => ({
+          root: () => ({
             minHeight: 40,
             borderRadius: radii.sm,
             transition: controlTransition,
-            '&:hover': { boxShadow: `0 3px 10px ${theme.palette.mode === 'light' ? alpha(theme.palette.primary.dark, 0.18) : 'rgba(0, 0, 0, 0.24)'}` },
+            '&:hover': { boxShadow: '0 3px 10px color-mix(in srgb, var(--fileharbor-shadow) 22%, transparent)' },
             '&:active': { transform: 'translateY(1px)', boxShadow: 'none' }
           }),
           sizeSmall: { minHeight: 32 },
           sizeLarge: { minHeight: 44 },
-          outlined: ({ theme }) => ({ borderColor: theme.palette.divider, '&:hover': { borderColor: theme.palette.primary.main } })
+          outlined: { borderColor: 'var(--mui-palette-divider)', '&:hover': { borderColor: 'var(--mui-palette-primary-main)' } }
         }
       },
       MuiIconButton: {
         styleOverrides: {
-          root: ({ theme }) => ({
+          root: () => ({
             minWidth: 40,
             minHeight: 40,
             borderRadius: radii.sm,
             transition: controlTransition,
-            '&:hover': { backgroundColor: 'var(--mui-palette-action-hover)', boxShadow: `0 2px 8px ${theme.palette.mode === 'light' ? alpha(theme.palette.primary.dark, 0.15) : 'rgba(0, 0, 0, 0.22)'}` },
+            '&:hover': { backgroundColor: 'var(--mui-palette-action-hover)', boxShadow: '0 2px 8px color-mix(in srgb, var(--fileharbor-shadow) 18%, transparent)' },
             '&:active': { transform: 'translateY(1px)', boxShadow: 'none' }
           }),
           sizeSmall: { minWidth: 32, minHeight: 32, ...compactTouchTarget }
@@ -235,7 +235,7 @@ export function createAppTheme(accentId: AccentId = 'forest') {
           notchedOutline: { borderColor: 'var(--mui-palette-divider)' }
         }
       },
-      MuiTableCell: { styleOverrides: { head: { backgroundColor: 'var(--mui-palette-background-paper)', color: 'var(--mui-palette-text-secondary)', fontWeight: 700 } } },
+      MuiTableCell: { styleOverrides: { head: { backgroundColor: 'var(--fileharbor-table-header)', color: 'var(--mui-palette-text-secondary)', fontWeight: 700 } } },
       MuiTableRow: {
         styleOverrides: {
           root: ({ theme }) => ({
@@ -245,9 +245,9 @@ export function createAppTheme(accentId: AccentId = 'forest') {
           })
         }
       },
-      MuiDialog: { styleOverrides: { paper: ({ theme }) => ({ backgroundImage: 'none', border: `1px solid ${theme.palette.divider}`, boxShadow: theme.palette.mode === 'light' ? `0 14px 36px ${alpha(theme.palette.primary.dark, 0.22)}` : '0 18px 42px rgba(0, 0, 0, 0.34)' }) } },
-      MuiDrawer: { styleOverrides: { paper: ({ theme }) => ({ backgroundImage: 'none', borderLeft: `1px solid ${theme.palette.divider}` }) } },
-      MuiMenu: { styleOverrides: { paper: ({ theme }) => ({ backgroundImage: 'none', border: `1px solid ${theme.palette.divider}`, boxShadow: theme.palette.mode === 'light' ? `0 8px 20px ${alpha(theme.palette.primary.dark, 0.18)}` : '0 10px 28px rgba(0, 0, 0, 0.3)' }) } },
+      MuiDialog: { styleOverrides: { paper: { backgroundColor: 'var(--fileharbor-overlay)', backgroundImage: 'none', border: '1px solid var(--mui-palette-divider)', boxShadow: '0 14px 36px color-mix(in srgb, var(--fileharbor-shadow) 30%, transparent)' } } },
+      MuiDrawer: { styleOverrides: { paper: { backgroundColor: 'var(--fileharbor-overlay)', backgroundImage: 'none', borderLeft: '1px solid var(--mui-palette-divider)' } } },
+      MuiMenu: { styleOverrides: { paper: { backgroundColor: 'var(--fileharbor-overlay)', backgroundImage: 'none', border: '1px solid var(--mui-palette-divider)', boxShadow: '0 8px 20px color-mix(in srgb, var(--fileharbor-shadow) 24%, transparent)' } } },
       MuiAlert: { styleOverrides: { root: { borderRadius: radii.sm } } },
       MuiLinearProgress: { styleOverrides: { root: { borderRadius: radii.sm, height: 6 } } },
       MuiCssBaseline: {
