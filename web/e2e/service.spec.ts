@@ -47,6 +47,8 @@ test.describe('Go service integration', () => {
   });
 
   test('moves a service file to the recycle bin, survives reload, and restores it', async ({ page }) => {
+    const recycleBin = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Recycle bin' }) });
+    const recycleBinEntry = recycleBin.getByText('seed.txt', { exact: true });
     await page.goto('/d/service-fixture');
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('Username').fill(username!);
@@ -60,11 +62,13 @@ test.describe('Go service integration', () => {
     await expect(page.getByRole('button', { name: 'seed.txt', exact: true })).not.toBeVisible();
 
     await page.getByRole('button', { name: 'Recycle bin' }).click();
-    await expect(page.getByText('seed.txt', { exact: true })).toBeVisible();
+    await expect(recycleBin).toBeVisible();
+    await expect(recycleBinEntry).toBeVisible();
     await page.reload();
     await page.getByRole('button', { name: 'Recycle bin' }).click();
-    await expect(page.getByText('seed.txt', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Restore' }).click();
-    await expect(page.getByRole('button', { name: 'seed.txt', exact: true })).toBeVisible();
+    await expect(recycleBin).toBeVisible();
+    await expect(recycleBinEntry).toBeVisible();
+    await recycleBin.getByRole('button', { name: 'Restore' }).click();
+    await expect(recycleBinEntry).not.toBeVisible();
   });
 });
