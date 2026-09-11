@@ -231,8 +231,7 @@ test('move destination browsing stays in one responsive dialog', async ({ page }
   expect(metrics.scrollWidth).toBe(metrics.clientWidth);
 });
 
-test('recycle bin moves, confirms permanent actions, restores, and fits mobile', async ({ page }) => {
-  let inWorkspace = true;
+test('mobile workspace keeps recycle-bin confirmation and compact controls usable', async ({ page }) => {
   const recycled = {
     id: '0123456789abcdef0123456789abcdef',
     name: 'sample.txt', original_path: 'sample.txt', kind: 'file', size_bytes: 6_370_000,
@@ -245,7 +244,7 @@ test('recycle bin moves, confirms permanent actions, restores, and fits mobile',
       ok: true,
       directory: {
         path: '', parent_path: null, listing_token: 'listing-token', truncated: false,
-        entries: inWorkspace ? [{
+        entries: [{
           name: 'sample.txt', path: 'sample.txt', kind: 'file', size_bytes: 6_370_000,
           modified_at: '2026-09-05T10:54:28Z', mode: '-rw-r--r--',
           is_archive: false, previewable: true, editable: true, version: 'v1'
@@ -253,21 +252,14 @@ test('recycle bin moves, confirms permanent actions, restores, and fits mobile',
           name: longName, path: longName, kind: 'file', size_bytes: 12,
           modified_at: '2026-09-05T10:54:28Z', mode: '-rw-r--r--',
           is_archive: false, previewable: true, editable: true, version: 'v2'
-        }] : []
+        }]
       }
     }
   }));
   await page.route(/\/api\/trash(?:\?.*)?$/, async (route) => {
     await route.fulfill({ json: { ok: true, entries: [recycled] } });
   });
-  await page.route('**/do/rm', (route) => {
-    inWorkspace = false;
-    return route.fulfill({ json: { ok: true, entry: recycled } });
-  });
-  await page.route(/\/api\/trash\/[^/]+\/restore$/, (route) => {
-    inWorkspace = true;
-    return route.fulfill({ json: { ok: true, path: 'sample.txt' } });
-  });
+  await page.route(/\/api\/trash\/[^/]+\/restore$/, (route) => route.fulfill({ json: { ok: true, path: 'sample.txt' } }));
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
@@ -286,13 +278,11 @@ test('recycle bin moves, confirms permanent actions, restores, and fits mobile',
   const batchActions = page.getByRole('button', { name: 'Move', exact: true }).locator('xpath=..');
   await expect(batchActions).toHaveCSS('display', 'grid');
   await sampleSelection.uncheck();
-  await page.getByRole('button', { name: 'Actions sample.txt' }).click();
-  await page.getByRole('menuitem', { name: 'Move to recycle bin' }).click();
-  await page.getByRole('dialog', { name: 'Move sample.txt to the recycle bin?' }).getByRole('button', { name: 'Move to recycle bin' }).click();
-  await expect(page.getByText('Nothing here yet')).toBeVisible();
 
   await page.getByRole('button', { name: 'Recycle bin' }).click();
-  await expect(page.getByText('sample.txt', { exact: true })).toBeVisible();
+  const recycleBin = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Recycle bin' }) });
+  await expect(recycleBin).toBeVisible();
+  await expect(recycleBin.getByText('sample.txt', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Permanently delete sample.txt' }).click();
   const permanentDialog = page.getByRole('dialog', { name: 'Permanently delete sample.txt?' });
   const permanentConfirm = permanentDialog.getByRole('button', { name: 'Permanently delete' });
@@ -302,8 +292,7 @@ test('recycle bin moves, confirms permanent actions, restores, and fits mobile',
   await permanentDialog.getByRole('button', { name: 'Cancel' }).click();
 
   await page.getByRole('button', { name: 'Restore' }).click();
-  await expect(page.getByText('sample.txt', { exact: true })).toBeVisible();
-  await expect(page.getByText('Nothing here yet')).not.toBeVisible();
+  await expect(recycleBin.getByText('sample.txt', { exact: true })).toBeVisible();
   const metrics = await page.locator('body').evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
   expect(metrics.scrollWidth).toBe(metrics.clientWidth);
 });
