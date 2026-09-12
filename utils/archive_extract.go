@@ -95,7 +95,8 @@ func ExtractArchiveContext(ctx context.Context, rawPath string) (string, error) 
 	if openedInfo.Size() == 0 {
 		return "", ErrCorruptArchive
 	}
-	if err := validateFormatHeader(source, format, openedInfo.Size()); err != nil {
+	format, err = resolveExtractionFormat(source, format, openedInfo.Size())
+	if err != nil {
 		return "", err
 	}
 
@@ -204,6 +205,25 @@ func sourceStillUnchanged(ctx context.Context, source *os.File, absolute string,
 		return ErrSourceChanged
 	}
 	return nil
+}
+
+// Only gzip-TAR aliases accept an uncompressed TAR with a mismatched suffix.
+// A gzip signature commits to gzip decoding; decoder failures never fall back.
+func resolveExtractionFormat(source *os.File, format ArchiveFormat, size int64) (ArchiveFormat, error) {
+	if format == ArchiveTARGzip {
+		var header [512]byte
+		n, err := source.ReadAt(header[:], 0)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", operationError("io_error")
+		}
+		if !bytes.HasPrefix(header[:n], []byte{0x1f, 0x8b}) && validTarHeader(header[:n]) {
+			format = ArchiveTAR
+		}
+	}
+	if err := validateFormatHeader(source, format, size); err != nil {
+		return "", err
+	}
+	return format, nil
 }
 
 func validateFormatHeader(source *os.File, format ArchiveFormat, size int64) error {
@@ -498,14 +518,21 @@ func newArchivePathRegistry() *archivePathRegistry {
 	}
 }
 
+func (r *archivePathRegistry) countEntry(size int64) error {
+	r.entries++
+	if size < 0 || r.entries > maxArchiveEntries {
+		return ErrArchiveLimitExceeded
+	}
+	return nil
+}
+
 func (r *archivePathRegistry) add(rawName string, directory bool, size int64, mode fs.FileMode) (string, error) {
 	name, err := validatePortableArchivePath(rawName)
 	if err != nil {
 		return "", err
 	}
-	r.entries++
-	if size < 0 || r.entries > maxArchiveEntries {
-		return "", ErrArchiveLimitExceeded
+	if err := r.countEntry(size); err != nil {
+		return "", err
 	}
 	if !directory {
 		if size > maxArchiveBytes || r.bytes > maxArchiveBytes-size {
@@ -818,7 +845,22 @@ func extractTARContext(ctx context.Context, source io.Reader, format ArchiveForm
 		if !directory && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
 			return nil, ErrArchiveUnsafeEntry
 		}
-		name, err := registry.add(header.Name, directory, header.Size, fs.FileMode(header.Mode))
+		if len(header.Name) > 4096 {
+			return nil, ErrArchiveUnsafeEntry
+		}
+		// TAR tools commonly emit root metadata and literal ./ prefixes. Do not
+		// clean other components or register root permissions as an output path.
+		if directory && (header.Name == "." || header.Name == "./") {
+			if err := registry.countEntry(header.Size); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		rawName := header.Name
+		for strings.HasPrefix(rawName, "./") {
+			rawName = strings.TrimPrefix(rawName, "./")
+		}
+		name, err := registry.add(rawName, directory, header.Size, fs.FileMode(header.Mode))
 		if err != nil {
 			return nil, err
 		}
@@ -845,7 +887,7 @@ func extractTARContext(ctx context.Context, source io.Reader, format ArchiveForm
 			return nil, mapDecoderError(err, stream)
 		}
 	}
-	if registry.entries == 0 {
+	if len(registry.tops) == 0 {
 		return nil, ErrCorruptArchive
 	}
 	if err := drainDecodedStream(ctx, stream); err != nil {

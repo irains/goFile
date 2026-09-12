@@ -1,8 +1,10 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -896,5 +898,159 @@ func TestLoginRejectsUnsafeNextAndPreviewIsPlainText(t *testing.T) {
 	}
 	if got := response.Header().Get("Cache-Control"); got != "no-store, private" {
 		t.Fatalf("missing preview cache-control = %q", got)
+	}
+}
+
+func TestTarExtractionRoutesPreserveSecurityAndAudit(t *testing.T) {
+	previousRoot, previousReader, previousUploader, previousBasePath := conf.FileHarbor, reader, uploader, basePath
+	conf.FileHarbor, reader, uploader, basePath = t.TempDir(), false, false, ""
+	t.Cleanup(func() {
+		conf.FileHarbor, reader, uploader, basePath = previousRoot, previousReader, previousUploader, previousBasePath
+	})
+	manager := testManager(t)
+	state := newTestState(t)
+	router := newRouter(manager, state)
+	cookie := loginCookie(t, router)
+	csrf := sessionCSRF(t, manager, cookie)
+	post := func(handler http.Handler, route, name string, session bool, token string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, route, strings.NewReader(url.Values{"path": {name}}.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("X-CSRF-Token", token)
+		if session {
+			request.AddCookie(cookie)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	for _, route := range []string{"/do/extract", "/do/unzip"} {
+		for _, variant := range []string{"plain", "gzip", "mislabeled", "unsafe", "corrupt"} {
+			t.Run(route+"/"+variant, func(t *testing.T) {
+				dir := strings.TrimPrefix(route, "/do/") + "-" + variant
+				if err := os.Mkdir(filepath.Join(conf.FileHarbor, dir), 0700); err != nil {
+					t.Fatal(err)
+				}
+				archive := dir + "/sample.tar.gz"
+				if variant == "plain" {
+					archive = dir + "/sample.tar"
+				}
+				var buffer bytes.Buffer
+				writer := tar.NewWriter(&buffer)
+				for _, header := range []*tar.Header{
+					{Name: "./", Typeflag: tar.TypeDir, Mode: 0755},
+					{Name: "./output.txt", Typeflag: tar.TypeReg, Mode: 0644, Size: 7},
+				} {
+					if err := writer.WriteHeader(header); err != nil {
+						t.Fatal(err)
+					}
+					if header.Size != 0 {
+						if _, err := writer.Write([]byte("payload")); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if variant == "unsafe" {
+					if err := writer.WriteHeader(&tar.Header{Name: "./../escape", Typeflag: tar.TypeReg, Mode: 0644}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				contents := buffer.Bytes()
+				if variant == "gzip" {
+					var compressed bytes.Buffer
+					gzipWriter := gzip.NewWriter(&compressed)
+					if _, err := gzipWriter.Write(contents); err != nil {
+						t.Fatal(err)
+					}
+					if err := gzipWriter.Close(); err != nil {
+						t.Fatal(err)
+					}
+					contents = compressed.Bytes()
+				}
+				if variant == "corrupt" {
+					contents = contents[:1027]
+				}
+				if err := os.WriteFile(filepath.Join(conf.FileHarbor, filepath.FromSlash(archive)), contents, 0600); err != nil {
+					t.Fatal(err)
+				}
+				beforeAudit := len(readAuditEvents(t, state))
+				response := post(router, route, archive, false, csrf)
+				if response.Code != http.StatusUnauthorized {
+					t.Fatalf("unauthenticated = %d", response.Code)
+				}
+				response = post(router, route, archive, true, "")
+				if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "csrf_invalid") {
+					t.Fatalf("missing CSRF = %d", response.Code)
+				}
+				if len(readAuditEvents(t, state)) != beforeAudit {
+					t.Fatal("rejected authentication reached extraction audit")
+				}
+				response = post(router, route, archive, true, csrf)
+				expectedCode := ""
+				if variant == "unsafe" {
+					expectedCode = "archive_unsafe_entry"
+				}
+				if variant == "corrupt" {
+					expectedCode = "corrupt_archive"
+				}
+				var body struct {
+					OK   bool   `json:"ok"`
+					Path string `json:"path"`
+					Code string `json:"code"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				events := readAuditEvents(t, state)[beforeAudit:]
+				if len(events) == 0 || events[0].Event != "archive.extract" || events[0].Outcome != "attempted" || events[0].Path != archive {
+					t.Fatalf("attempt audit = %#v", events)
+				}
+				if expectedCode != "" {
+					if response.Code != http.StatusBadRequest || body.OK || body.Code != expectedCode || len(events) != 1 {
+						t.Fatalf("failure = %d, %#v; events=%d", response.Code, body, len(events))
+					}
+				} else {
+					if response.Code != http.StatusOK || !body.OK || body.Path != archive {
+						t.Fatalf("success = %d, %#v", response.Code, body)
+					}
+					if len(events) != 2 || events[1].Event != "archive.extract" || events[1].Outcome != "success" || events[1].Path != archive {
+						t.Fatalf("success audit = %#v", events)
+					}
+					if data, err := os.ReadFile(filepath.Join(conf.FileHarbor, dir, "output.txt")); err != nil || string(data) != "payload" {
+						t.Fatalf("output = %q, %v", data, err)
+					}
+					beforeRepeat := len(readAuditEvents(t, state))
+					response = post(router, route, archive, true, csrf)
+					if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "destination_exists") {
+						t.Fatalf("repeat = %d: %s", response.Code, response.Body.String())
+					}
+					events = readAuditEvents(t, state)[beforeRepeat:]
+					if len(events) != 1 || events[0].Outcome != "attempted" || events[0].Path != archive {
+						t.Fatalf("repeat audit = %#v", events)
+					}
+					if data, err := os.ReadFile(filepath.Join(conf.FileHarbor, dir, "output.txt")); err != nil || string(data) != "payload" {
+						t.Fatal("repeat changed output")
+					}
+				}
+				entries, err := os.ReadDir(filepath.Join(conf.FileHarbor, dir))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range entries {
+					if entry.Name() != filepath.Base(archive) && (expectedCode != "" || entry.Name() != "output.txt") {
+						t.Fatalf("partial output or stage: %q", entry.Name())
+					}
+				}
+			})
+		}
+	}
+	reader = true
+	readOnlyRouter := newTestRouter(t, manager)
+	for _, route := range []string{"/do/extract", "/do/unzip"} {
+		if response := post(readOnlyRouter, route, "extract-plain/sample.tar", true, csrf); response.Code != http.StatusNotFound {
+			t.Fatalf("read-only = %d", response.Code)
+		}
 	}
 }

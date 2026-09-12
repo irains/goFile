@@ -8,12 +8,14 @@ import (
 	"compress/gzip"
 	"compress/zlib"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -75,7 +77,7 @@ func tarFixture(t *testing.T, entries []tarFixtureEntry) []byte {
 	var buffer bytes.Buffer
 	writer := tar.NewWriter(&buffer)
 	for _, entry := range entries {
-		header := &tar.Header{Name: entry.name, Mode: int64(entry.mode.Perm()), Size: int64(len(entry.data)), Typeflag: entry.kind}
+		header := &tar.Header{Name: entry.name, Mode: int64(entry.mode.Perm()), Size: int64(len(entry.data)), Typeflag: entry.kind, Format: entry.format}
 		if entry.kind == tar.TypeDir {
 			header.Size = 0
 		}
@@ -95,10 +97,11 @@ func tarFixture(t *testing.T, entries []tarFixtureEntry) []byte {
 }
 
 type tarFixtureEntry struct {
-	name string
-	data []byte
-	mode os.FileMode
-	kind byte
+	name   string
+	data   []byte
+	mode   os.FileMode
+	kind   byte
+	format tar.Format
 }
 
 func newZlibFixtureWriter(w io.Writer) (io.WriteCloser, error) {
@@ -300,12 +303,13 @@ func TestTarFormatsExtract(t *testing.T) {
 
 func TestArchiveRejectsUnsafeEntriesAndCollisions(t *testing.T) {
 	for name, entries := range map[string][]zipFixtureEntry{
-		"traversal": {{name: "../escape", data: []byte("x"), mode: 0644}},
-		"link":      {{name: "link", data: []byte("target"), mode: os.ModeSymlink | 0777}},
-		"duplicate": {{name: "file", data: []byte("a"), mode: 0644}, {name: "file", data: []byte("b"), mode: 0644}},
-		"case_fold": {{name: "File", data: []byte("a"), mode: 0644}, {name: "file", data: []byte("b"), mode: 0644}},
-		"file_dir":  {{name: "item", data: []byte("a"), mode: 0644}, {name: "item/child", data: []byte("b"), mode: 0644}},
-		"reserved":  {{name: ".fileharbor-extract-hidden", data: []byte("a"), mode: 0644}},
+		"dot_prefix": {{name: "./file", data: []byte("x"), mode: 0644}},
+		"traversal":  {{name: "../escape", data: []byte("x"), mode: 0644}},
+		"link":       {{name: "link", data: []byte("target"), mode: os.ModeSymlink | 0777}},
+		"duplicate":  {{name: "file", data: []byte("a"), mode: 0644}, {name: "file", data: []byte("b"), mode: 0644}},
+		"case_fold":  {{name: "File", data: []byte("a"), mode: 0644}, {name: "file", data: []byte("b"), mode: 0644}},
+		"file_dir":   {{name: "item", data: []byte("a"), mode: 0644}, {name: "item/child", data: []byte("b"), mode: 0644}},
+		"reserved":   {{name: ".fileharbor-extract-hidden", data: []byte("a"), mode: 0644}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := withArchiveRoot(t)
@@ -576,5 +580,415 @@ func TestArchiveLimitAndUnsupportedCompression(t *testing.T) {
 	}
 	if _, err := ExtractArchive("limit.zip"); ErrorCode(err) != "archive_limit_exceeded" {
 		t.Fatalf("limit error = %v", err)
+	}
+}
+
+func TestTarRelativePathsExtract(t *testing.T) {
+	for _, format := range []tar.Format{tar.FormatGNU, tar.FormatUSTAR, tar.FormatPAX} {
+		for _, compressed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/gzip=%v", format, compressed), func(t *testing.T) {
+				root := withArchiveRoot(t)
+				longName := strings.Repeat("n", 120)
+				if format == tar.FormatUSTAR {
+					longName = strings.Repeat("n", 80) + "/" + strings.Repeat("m", 80)
+				}
+				entries := []tarFixtureEntry{
+					{name: ".", mode: 0000, kind: tar.TypeDir},
+					{name: "./folder/", mode: 0755, kind: tar.TypeDir},
+					{name: "./folder/file.txt", data: []byte("tar payload"), mode: 0644, kind: tar.TypeReg},
+					{name: "././late/" + longName, data: []byte("long-name payload"), mode: 0644, kind: tar.TypeReg},
+					{name: "./late/", mode: 0755, kind: tar.TypeDir},
+					{name: "./", mode: 0777, kind: tar.TypeDir},
+				}
+				for index := range entries {
+					entries[index].format = format
+				}
+				contents := tarFixture(t, entries)
+				if format == tar.FormatGNU && !bytes.Contains(contents, []byte("././@LongLink")) {
+					t.Fatal("fixture lacks a GNU long-name record")
+				}
+				if format == tar.FormatPAX && !bytes.Contains(contents, []byte("path=././late/")) {
+					t.Fatal("fixture lacks a PAX path record")
+				}
+				name := "sample.tar"
+				if compressed {
+					name += ".gz"
+					writeCompressedFixture(t, filepath.Join(root, name), func(w io.Writer) (io.WriteCloser, error) { return gzip.NewWriter(w), nil }, contents)
+				} else if err := os.WriteFile(filepath.Join(root, name), contents, 0600); err != nil {
+					t.Fatal(err)
+				}
+				before, err := os.Stat(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, err := ExtractArchive(name); err != nil || got != name {
+					t.Fatalf("ExtractArchive = %q, %v", got, err)
+				}
+				for name, want := range map[string]string{"folder/file.txt": "tar payload", "late/" + longName: "long-name payload"} {
+					if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name))); err != nil || string(data) != want {
+						t.Fatalf("output %q = %q, %v", name, data, err)
+					}
+				}
+				after, err := os.Stat(root)
+				if err != nil || before.Mode() != after.Mode() {
+					t.Fatalf("output root mode changed: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestTarGzipSuffixAcceptsRawTAR(t *testing.T) {
+	for _, suffix := range []string{".tar.gz", ".tgz", ".tar.gzip", ".TaR.Gz", ".TGZ", ".TaR.GZip"} {
+		for _, compressed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/gzip=%v", suffix, compressed), func(t *testing.T) {
+				root := withArchiveRoot(t)
+				name := "sample" + suffix
+				contents := tarFixture(t, []tarFixtureEntry{{name: "file.txt", data: []byte("payload"), mode: 0644, kind: tar.TypeReg}})
+				if compressed {
+					writeCompressedFixture(t, filepath.Join(root, name), func(w io.Writer) (io.WriteCloser, error) { return gzip.NewWriter(w), nil }, contents)
+				} else if err := os.WriteFile(filepath.Join(root, name), contents, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if got, err := ExtractArchive(name); err != nil || got != name {
+					t.Fatalf("ExtractArchive = %q, %v", got, err)
+				}
+				if data, err := os.ReadFile(filepath.Join(root, "file.txt")); err != nil || string(data) != "payload" {
+					t.Fatalf("output = %q, %v", data, err)
+				}
+			})
+		}
+	}
+}
+
+func assertArchiveRootEntries(t *testing.T, root string, names ...string) {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := make(map[string]bool, len(names))
+	for _, name := range names {
+		wanted[name] = true
+	}
+	if len(entries) != len(wanted) {
+		t.Fatalf("unexpected output or staging: got %d entries, want %d", len(entries), len(wanted))
+	}
+	for _, entry := range entries {
+		if !wanted[entry.Name()] {
+			t.Fatalf("unexpected output or staging: %q", entry.Name())
+		}
+	}
+}
+
+func assertTarRejected(t *testing.T, name string, contents []byte, code string) {
+	t.Helper()
+	root := withArchiveRoot(t)
+	archivePath := filepath.Join(root, name)
+	if err := os.WriteFile(archivePath, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExtractArchive(name); ErrorCode(err) != code {
+		t.Fatalf("error = %v, want %s", err, code)
+	}
+	assertArchiveRootEntries(t, root, name)
+	after, err := os.ReadFile(archivePath)
+	if err != nil || sha256.Sum256(after) != sha256.Sum256(contents) {
+		t.Fatalf("source archive changed: %v", err)
+	}
+}
+
+func TestTarRejectsUnsafePathsAndTypes(t *testing.T) {
+	for index, name := range []string{
+		"./../escape", "/absolute", ".//absolute", "./dir/../escape", "./dir/./file",
+		"./dir//file", "./C:/drive", `./C:\drive`, `./\server\share`, `./dir\..\escape`,
+		"./CON", "./file:stream", "./.fileharbor-extract-hidden", "./file.", "./file ",
+		strings.Repeat("./", 2048) + "file", "./" + strings.Repeat("x", 256),
+	} {
+		t.Run(fmt.Sprintf("path-%d", index), func(t *testing.T) {
+			contents := tarFixture(t, []tarFixtureEntry{
+				{name: "./safe", data: []byte("staged only"), mode: 0644, kind: tar.TypeReg},
+				{name: name, data: []byte("unsafe"), mode: 0644, kind: tar.TypeReg},
+			})
+			assertTarRejected(t, "unsafe.tar", contents, "archive_unsafe_entry")
+		})
+	}
+	for _, kind := range []byte{tar.TypeSymlink, tar.TypeLink, tar.TypeFifo, tar.TypeChar, tar.TypeBlock} {
+		t.Run(fmt.Sprintf("type-%c", kind), func(t *testing.T) {
+			contents := tarFixture(t, []tarFixtureEntry{
+				{name: "./safe", data: []byte("staged only"), mode: 0644, kind: tar.TypeReg},
+				{name: "./unsafe", mode: 0644, kind: kind},
+			})
+			assertTarRejected(t, "unsafe.tar.gz", contents, "archive_unsafe_entry")
+		})
+	}
+	for _, name := range []string{"", ".", "./", "./.", "././"} {
+		for _, kind := range []byte{tar.TypeReg, tar.TypeDir, tar.TypeSymlink, tar.TypeLink} {
+			if kind == tar.TypeDir && (name == "." || name == "./") {
+				continue
+			}
+			t.Run(fmt.Sprintf("root-%q-type-%c", name, kind), func(t *testing.T) {
+				// Patch a synthetic header to exercise names the TAR writer refuses.
+				contents := tarFixture(t, []tarFixtureEntry{{name: "placeholder", mode: 0644, kind: kind}})
+				clear(contents[:100])
+				copy(contents[:100], name)
+				for i := 148; i < 156; i++ {
+					contents[i] = ' '
+				}
+				var checksum int
+				for _, value := range contents[:512] {
+					checksum += int(value)
+				}
+				copy(contents[148:156], fmt.Sprintf("%06o\x00 ", checksum))
+				assertTarRejected(t, "root.tar", contents, "archive_unsafe_entry")
+			})
+		}
+	}
+}
+
+func TestTarRejectsNormalizedCollisions(t *testing.T) {
+	file := func(name string) tarFixtureEntry {
+		return tarFixtureEntry{name: name, data: []byte("file"), mode: 0644, kind: tar.TypeReg}
+	}
+	dir := func(name string) tarFixtureEntry { return tarFixtureEntry{name: name, mode: 0755, kind: tar.TypeDir} }
+	for name, entries := range map[string][]tarFixtureEntry{
+		"same_file":      {file("file"), file("./file")},
+		"case_fold":      {file("./File"), file("./file")},
+		"same_dir":       {dir("dir/"), dir("./dir/")},
+		"file_parent":    {file("./item"), file("./item/child")},
+		"replace_parent": {file("./item/child"), file("./item")},
+		"file_to_dir":    {file("./item"), dir("./item/")},
+		"dir_to_file":    {dir("./item/"), file("./item")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertTarRejected(t, "collision.tar.gz", tarFixture(t, entries), "archive_unsafe_entry")
+		})
+	}
+}
+
+func TestTarRootMetadataQuotaAndEmpty(t *testing.T) {
+	for _, rootName := range []string{".", "./"} {
+		t.Run("empty-"+rootName, func(t *testing.T) {
+			assertTarRejected(t, "empty.tar", tarFixture(t, []tarFixtureEntry{{name: rootName, kind: tar.TypeDir}}), "corrupt_archive")
+		})
+	}
+	for _, count := range []int{maxArchiveEntries - 1, maxArchiveEntries} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			entries := []tarFixtureEntry{{name: "./file", data: []byte("ok"), mode: 0644, kind: tar.TypeReg}}
+			for index := 0; index < count; index++ {
+				entries = append(entries, tarFixtureEntry{name: "./", kind: tar.TypeDir})
+			}
+			contents := tarFixture(t, entries)
+			if count == maxArchiveEntries {
+				assertTarRejected(t, "limit.tar", contents, "archive_limit_exceeded")
+				return
+			}
+			root := withArchiveRoot(t)
+			if err := os.WriteFile(filepath.Join(root, "limit.tar"), contents, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ExtractArchive("limit.tar"); err != nil {
+				t.Fatal(err)
+			}
+			assertArchiveRootEntries(t, root, "limit.tar", "file")
+		})
+	}
+}
+
+func TestTarRootMetadataDoesNotChangeStageMode(t *testing.T) {
+	stage, output := t.TempDir(), t.TempDir()
+	if err := os.Chmod(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := tarFixture(t, []tarFixtureEntry{
+		{name: "./", mode: 0777, kind: tar.TypeDir},
+		{name: "./file", data: []byte("ok"), mode: 0644, kind: tar.TypeReg},
+		{name: ".", mode: 0000, kind: tar.TypeDir},
+	})
+	if _, err := extractTARContext(context.Background(), bytes.NewReader(contents), ArchiveTAR, stage, output); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(stage)
+	if err != nil || before.Mode() != after.Mode() {
+		t.Fatalf("staging root mode changed: %v", err)
+	}
+	if runtime.GOOS != "windows" && after.Mode().Perm() != 0700 {
+		t.Fatalf("staging root permissions = %v", after.Mode())
+	}
+}
+
+func TestTarCorruptionAndFormatBoundaries(t *testing.T) {
+	contents := tarFixture(t, []tarFixtureEntry{
+		{name: "./safe", data: []byte("safe"), mode: 0644, kind: tar.TypeReg},
+		{name: "./second", data: []byte("second payload"), mode: 0644, kind: tar.TypeReg},
+		{name: "./", kind: tar.TypeDir},
+	})
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	if _, err := writer.Write(contents); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	badGzip := bytes.Clone(buffer.Bytes())
+	badGzip[len(badGzip)-8] ^= 1
+	badTar := bytes.Clone(contents)
+	badTar[0] ^= 1
+	for name, data := range map[string][]byte{
+		"checksum.tar":    badTar,
+		"checksum.tar.gz": badTar,
+		"short.tar.gz":    contents[:511],
+		"empty.tar.gz":    nil,
+		"zero.tar.gz":     make([]byte, 1024),
+		"payload.tar":     contents[:1539],
+		"payload.tar.gz":  contents[:1539],
+		"header.tar":      contents[:1224],
+		"header.tar.gz":   contents[:1224],
+		"trailer.tar.gz":  badGzip,
+		"truncated.tgz":   buffer.Bytes()[:buffer.Len()-1],
+		"standalone.gz":   contents,
+		"standalone.gzip": contents,
+		"other.tar.bz2":   contents,
+		"other.tar.xz":    contents,
+	} {
+		t.Run(name, func(t *testing.T) { assertTarRejected(t, name, data, "corrupt_archive") })
+	}
+}
+
+func TestTarPublicationGuards(t *testing.T) {
+	for _, scenario := range []string{"existing", "race", "source", "cancel"} {
+		t.Run(scenario, func(t *testing.T) {
+			root := withArchiveRoot(t)
+			contents := tarFixture(t, []tarFixtureEntry{{name: "./target", data: []byte("archive"), mode: 0644, kind: tar.TypeReg}})
+			archivePath := filepath.Join(root, "sample.tar.gz")
+			if err := os.WriteFile(archivePath, contents, 0600); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			want := "destination_exists"
+			createTarget := func() {
+				if err := os.WriteFile(filepath.Join(root, "target"), []byte("existing"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch scenario {
+			case "existing":
+				createTarget()
+			case "race":
+				archiveBeforePublishHook = createTarget
+			case "source":
+				want = "source_changed"
+				before, err := os.Stat(archivePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				archiveBeforePublishHook = func() {
+					changed := bytes.Clone(contents)
+					changed[512] ^= 1
+					if err := os.WriteFile(archivePath, changed, 0600); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chtimes(archivePath, before.ModTime(), before.ModTime()); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "cancel":
+				want = "request_cancelled"
+				archiveBeforePublishHook = cancel
+			}
+			if _, err := ExtractArchiveContext(ctx, "sample.tar.gz"); ErrorCode(err) != want {
+				t.Fatalf("error = %v, want %s", err, want)
+			}
+			if want == "destination_exists" {
+				assertArchiveRootEntries(t, root, "sample.tar.gz", "target")
+				if data, err := os.ReadFile(filepath.Join(root, "target")); err != nil || string(data) != "existing" {
+					t.Fatalf("existing target changed: %v", err)
+				}
+			} else {
+				assertArchiveRootEntries(t, root, "sample.tar.gz")
+			}
+			if scenario != "source" {
+				after, err := os.ReadFile(archivePath)
+				if err != nil || sha256.Sum256(after) != sha256.Sum256(contents) {
+					t.Fatalf("source changed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestTarCancellationDuringCopy(t *testing.T) {
+	root := withArchiveRoot(t)
+	contents := tarFixture(t, []tarFixtureEntry{
+		{name: "./", kind: tar.TypeDir},
+		{name: "./large", data: bytes.Repeat([]byte("cancel-me"), 1<<18), mode: 0644, kind: tar.TypeReg},
+	})
+	archivePath := filepath.Join(root, "large.tar.gz")
+	writeCompressedFixture(t, archivePath, func(w io.Writer) (io.WriteCloser, error) { return gzip.NewWriter(w), nil }, contents)
+	before, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, cancel := context.WithCancel(context.Background())
+	ctx := &cancelAfterReadsContext{Context: base, cancel: cancel}
+	ctx.remaining.Store(40)
+	defer cancel()
+	if _, err := ExtractArchiveContext(ctx, "large.tar.gz"); ErrorCode(err) != "request_cancelled" {
+		t.Fatalf("mid-copy cancel = %v", err)
+	}
+	if !ctx.cancelled.Load() {
+		t.Fatal("did not reach cancellation point")
+	}
+	assertArchiveRootEntries(t, root, "large.tar.gz")
+	after, err := os.ReadFile(archivePath)
+	if err != nil || sha256.Sum256(before) != sha256.Sum256(after) {
+		t.Fatalf("source changed: %v", err)
+	}
+}
+
+func TestExtractionFormatGzipSignatureAndIOError(t *testing.T) {
+	root := withArchiveRoot(t)
+	contents := tarFixture(t, []tarFixtureEntry{{name: "file", mode: 0644, kind: tar.TypeReg}})
+	// Both routing signatures match. Gzip must take precedence, even if invalid.
+	contents[0], contents[1] = 0x1f, 0x8b
+	for index := 148; index < 156; index++ {
+		contents[index] = ' '
+	}
+	var checksum int
+	for _, value := range contents[:512] {
+		checksum += int(value)
+	}
+	copy(contents[148:156], fmt.Sprintf("%06o\x00 ", checksum))
+	if !validTarHeader(contents[:512]) {
+		t.Fatal("fixture must have a valid TAR checksum")
+	}
+	archivePath := filepath.Join(root, "signature.tar.gz")
+	if err := os.WriteFile(archivePath, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.Open(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	format, err := resolveExtractionFormat(source, ArchiveTARGzip, int64(len(contents)))
+	if err != nil || format != ArchiveTARGzip {
+		t.Fatalf("format = %q, %v", format, err)
+	}
+	if _, err := ExtractArchive("signature.tar.gz"); ErrorCode(err) != "corrupt_archive" {
+		t.Fatalf("invalid gzip = %v", err)
+	}
+	assertArchiveRootEntries(t, root, "signature.tar.gz")
+	if err := source.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveExtractionFormat(source, ArchiveTARGzip, int64(len(contents))); ErrorCode(err) != "io_error" {
+		t.Fatalf("closed source error = %v", err)
 	}
 }
